@@ -1,0 +1,40 @@
+{
+    "limbs": 6,
+    "servos_per_limb": 3,
+    "limb_names": [
+        "Front Left",
+        "Front Right",
+        "Middle Left",
+        "Middle Right",
+        "Rear Left",
+        "Rear Right"
+    ],
+    "joint_names": ["Hip", "Thigh", "Tibia"],
+    "servo_defaults": {
+        "hip": {
+            "default_angle": 90,
+            "min_angle": 40,
+            "max_angle": 150,
+            "safe_min": 50,
+            "safe_max": 140
+        },
+        "thigh": {
+            "default_angle": 0,
+            "min_angle": 0,
+            "max_angle": 180,
+            "safe_min": 10,
+            "safe_max": 170
+        },
+        "tibia": {
+            "default_angle": 0,
+            "min_angle": 0,
+            "max_angle": 180,
+            "safe_min": 10,
+            "safe_max": 170
+        }
+    },
+    "movement": {
+        "max_speed_deg_per_sec": 300,
+        "acceleration_deg_per_sec2": 500
+    }
+}

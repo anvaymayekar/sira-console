@@ -1,0 +1,28 @@
+{
+    "window": {
+        "title": "SIRA Console",
+        "min_width": 1280,
+        "min_height": 720,
+        "default_width": 1920,
+        "default_height": 1080
+    },
+    "camera": {
+        "default_resolution": "1280x720",
+        "resolutions": ["640x480", "1280x720", "1920x1080"],
+        "default_fps": 30,
+        "fps_options": [15, 30, 60]
+    },
+    "ui": {
+        "theme": "dark",
+        "accent_color": "#ffc107",
+        "update_interval_ms": 33
+    },
+    "telemetry": {
+        "max_log_lines": 1000,
+        "auto_scroll": true
+    },
+    "analysis": {
+        "graph_update_interval_ms": 100,
+        "data_retention_seconds": 300
+    }
+}
