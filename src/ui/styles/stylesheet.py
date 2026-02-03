@@ -380,7 +380,6 @@ def get_main_stylesheet() -> str:
         font-weight: 600;
         letter-spacing: 1px;
         color: #f5c542;
-        padding-left: 12px;
         padding-right: 12px;
     }}
 
