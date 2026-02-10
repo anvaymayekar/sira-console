@@ -84,7 +84,7 @@ class CameraView(QWidget):
 
         # Right controls
         resolution_label = QLabel("Resolution:")
-        resolution_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY};")
+        resolution_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; border: none;")
 
         self.resolution_combo = QComboBox()
         self.resolution_combo.addItems(["640x480", "1280x720", "1920x1080"])
@@ -92,7 +92,7 @@ class CameraView(QWidget):
         self.resolution_combo.currentTextChanged.connect(self._change_resolution)
 
         fps_label = QLabel("FPS:")
-        fps_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY};")
+        fps_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; border: none;")
 
         self.fps_combo = QComboBox()
         self.fps_combo.addItems(["15", "30", "60"])

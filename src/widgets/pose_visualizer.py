@@ -395,6 +395,7 @@ class PoseVisualizer(QWidget):
                 font-size: 11pt;
                 font-weight: bold;
                 border: 1px solid #3a3a3a;
+                border-radius: 0px;
                 border-bottom: 2px solid #ffd700;
             }
         """

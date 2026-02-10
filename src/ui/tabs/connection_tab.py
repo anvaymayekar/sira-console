@@ -119,7 +119,7 @@ class ConnectionTab(QWidget):
             QTextEdit {{
                 background-color: {Colors.PRIMARY_BG};
                 color: {Colors.TEXT_PRIMARY};
-                border: 1px solid {Colors.BORDER};
+                border: none;
                 font-family: Consolas, Monaco, Courier New, monospace;
                 font-size: 9pt;
             }}

@@ -84,6 +84,7 @@ def get_main_stylesheet() -> str:
         background-color: {Colors.SECONDARY_BG};
         color: {Colors.TEXT_PRIMARY};
         border: 1px solid {Colors.BORDER};
+        border-radius: 6px;
         padding: 6px 16px;
         font-size: {Fonts.SIZE_NORMAL}pt;
         min-height: 24px;
@@ -109,6 +110,7 @@ def get_main_stylesheet() -> str:
         color: {Colors.TEXT_PRIMARY};
         background-color: transparent;
         font-size: {Fonts.SIZE_NORMAL}pt;
+        border-radius: 8px;
     }}
     
     /* Line Edit */
@@ -116,6 +118,7 @@ def get_main_stylesheet() -> str:
         background-color: {Colors.PANEL_BG};
         color: {Colors.TEXT_PRIMARY};
         border: 1px solid {Colors.BORDER};
+        border-radius: 6px;
         padding: 6px;
         font-size: {Fonts.SIZE_NORMAL}pt;
     }}
@@ -129,6 +132,7 @@ def get_main_stylesheet() -> str:
         background-color: {Colors.PANEL_BG};
         color: {Colors.TEXT_PRIMARY};
         border: 1px solid {Colors.BORDER};
+        border-radius: 6px;
         padding: 6px;
         font-size: {Fonts.SIZE_NORMAL}pt;
     }}
@@ -185,6 +189,7 @@ def get_main_stylesheet() -> str:
         background-color: {Colors.PANEL_BG};
         color: {Colors.TEXT_PRIMARY};
         border: 1px solid {Colors.BORDER};
+        border-radius: 8px;
         font-family: {Fonts.FAMILY};
         font-size: {Fonts.SIZE_NORMAL}pt;
     }}
@@ -286,6 +291,7 @@ def get_main_stylesheet() -> str:
     /* Group Box */
     QGroupBox {{
         border: 1px solid {Colors.BORDER};
+        border-radius: 7px;
         margin-top: 12px;
         padding-top: 12px;
         color: {Colors.TEXT_PRIMARY};
@@ -334,6 +340,7 @@ def get_main_stylesheet() -> str:
     /* Frame */
     QFrame {{
         border: none;
+        border-radius: 7px;
     }}
 
     /* Message Box */
@@ -382,7 +389,6 @@ def get_main_stylesheet() -> str:
         color: #f5c542;
         padding-right: 12px;
     }}
-
     """
 
 
