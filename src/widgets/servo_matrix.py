@@ -35,9 +35,9 @@ class ToggleSwitch(QWidget):
     toggled = pyqtSignal(bool)  # True = radians
 
     _PADDING = 4
-    _PILL_H = 22
-    _PILL_W = 72
-    _KNOB_SIZE = 14
+    _PILL_H = 20
+    _PILL_W = 66
+    _KNOB_SIZE = 12
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -100,8 +100,8 @@ class LimbHeader(QWidget):
         super().__init__(parent)
         self.line1 = line1.upper()
         self.line2 = line2.upper()
-        self.setMinimumWidth(80)
-        self.setFixedHeight(58)
+        self.setMinimumWidth(72)
+        self.setFixedHeight(52)
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -113,7 +113,7 @@ class LimbHeader(QWidget):
         p.drawLine(6, h - 1, w - 6, h - 1)
 
         # Diamond accent at top-centre
-        diamond_r = 6
+        diamond_r = 5
         cx = w / 2
         path = QPainterPath()
         path.moveTo(cx, 4)
@@ -127,18 +127,18 @@ class LimbHeader(QWidget):
 
         # Line 1
         f1 = QFont()
-        f1.setPointSize(11)
+        f1.setPointSize(10)
         f1.setBold(True)
         p.setFont(f1)
         p.setPen(QColor(Colors.TEXT_PRIMARY))
-        p.drawText(QRect(0, 17, w, 20), Qt.AlignHCenter | Qt.AlignVCenter, self.line1)
+        p.drawText(QRect(0, 16, w, 18), Qt.AlignHCenter | Qt.AlignVCenter, self.line1)
 
         # Line 2
         f2 = QFont()
-        f2.setPointSize(9)
+        f2.setPointSize(8)
         p.setFont(f2)
         p.setPen(QColor(Colors.TEXT_SECONDARY))
-        p.drawText(QRect(0, 37, w, 18), Qt.AlignHCenter | Qt.AlignVCenter, self.line2)
+        p.drawText(QRect(0, 34, w, 16), Qt.AlignHCenter | Qt.AlignVCenter, self.line2)
 
         p.end()
 
@@ -169,10 +169,10 @@ class JointHeader(QWidget):
             f"""
             QLabel {{
                 color: {Colors.TEXT_PRIMARY};
-                font-size: 12pt;
+                font-size: 11pt;
                 font-weight: bold;
                 background: transparent;
-                padding: 2pt;
+                padding: 2px;
             }}
             """
         )
@@ -251,7 +251,7 @@ class _SpeedometerDial(QWidget):
 
     def _arc_rect(self) -> QRect:
         """Bounding rect for the arc, leaving margin."""
-        m = 6
+        m = 5
         return QRect(m, m, self.width() - m * 2, self.height() - m * 2)
 
     def _zone_color(self) -> QColor:
@@ -265,8 +265,8 @@ class _SpeedometerDial(QWidget):
         """Convert servo angle → arc angle in standard Qt degrees (counter-clockwise from 3 o'clock)."""
         total = self._max_angle - self._min_angle or 1
         frac = (servo_angle - self._min_angle) / total
-        # _ARC_START is measured clockwise from 3 o'clock (Qt convention: negative = clockwise)
-        # We go clockwise so subtract
+        # Start at 225° (bottom-left), going clockwise means subtracting degrees
+        # (since Qt measures counter-clockwise from 3 o'clock)
         arc_deg = self._ARC_START - frac * self._ARC_SWEEP
         return arc_deg
 
@@ -276,17 +276,31 @@ class _SpeedometerDial(QWidget):
         cy = self.height() / 2
         dx = pos.x() - cx
         dy = pos.y() - cy
-        # atan2 gives CCW from 3 o'clock in radians; convert to CW degrees from 3 o'clock
-        deg = -math.degrees(math.atan2(-dy, dx))  # clockwise from 3 o'clock
+        # atan2 gives angle in radians, CCW from positive x-axis (3 o'clock)
+        # Convert to degrees: 0° = 3 o'clock, 90° = 12 o'clock, 180° = 9 o'clock, 270° = 6 o'clock
+        deg = math.degrees(
+            math.atan2(-dy, dx)
+        )  # negate dy because y increases downward
         if deg < 0:
             deg += 360
 
-        # Map into arc: _ARC_START going clockwise _ARC_SWEEP degrees
-        # arc_pos = how far CW we are from the start of the arc (225° CW from 3 o'clock)
-        arc_pos = (self._ARC_START - deg) % 360
-        # Clamp to arc sweep
-        arc_pos = max(0.0, min(float(self._ARC_SWEEP), arc_pos))
-        frac = arc_pos / self._ARC_SWEEP
+        # Now deg is 0-360 where 0° is 3 o'clock, increasing CCW
+        # Our arc starts at 225° and sweeps clockwise (decreasing degrees) to -45° (or 315°)
+        # So the arc spans from 225° down to -45° (going through 180°, 135°, 90°, 45°, 0°, -45°)
+
+        # Calculate how far clockwise we are from the start (225°)
+        # Going clockwise means decreasing degrees
+        arc_offset = self._ARC_START - deg
+
+        # Handle wraparound: if we're past 0° going into negative (315°-360° range)
+        if arc_offset < 0:
+            arc_offset += 360
+
+        # Clamp to valid arc range [0, 270]
+        arc_offset = max(0.0, min(float(self._ARC_SWEEP), arc_offset))
+
+        # Convert to servo angle
+        frac = arc_offset / self._ARC_SWEEP
         servo = int(round(self._min_angle + frac * (self._max_angle - self._min_angle)))
         return max(self._min_angle, min(self._max_angle, servo))
 
@@ -340,17 +354,20 @@ class _SpeedometerDial(QWidget):
         p.drawEllipse(rect)
 
         # ── dim track arc (full sweep, grey) ──
-        track_pen = QPen(QColor(Colors.BORDER), 4, Qt.SolidLine, Qt.RoundCap)
+        track_pen = QPen(QColor(Colors.BORDER), 3, Qt.SolidLine, Qt.RoundCap)
         p.setPen(track_pen)
         p.setBrush(Qt.NoBrush)
-        inner = rect.adjusted(5, 5, -5, -5)
+        inner = rect.adjusted(4, 4, -4, -4)
+        # Qt's drawArc: startAngle and spanAngle in 16ths of a degree
+        # Positive span = counter-clockwise, negative span = clockwise
+        # We want clockwise from 225° (bottom-left), so use negative span
         p.drawArc(inner, self._ARC_START * 16, -self._ARC_SWEEP * 16)
 
         # ── filled arc showing current position ──
         total = self._max_angle - self._min_angle or 1
         frac = (self._angle - self._min_angle) / total
         filled = int(frac * self._ARC_SWEEP)
-        value_pen = QPen(color, 4, Qt.SolidLine, Qt.RoundCap)
+        value_pen = QPen(color, 3, Qt.SolidLine, Qt.RoundCap)
         p.setPen(value_pen)
         p.drawArc(inner, self._ARC_START * 16, -filled * 16)
 
@@ -362,10 +379,10 @@ class _SpeedometerDial(QWidget):
         # ── centre value text ──
         if self._radians:
             text = f"{math.radians(self._angle):.2f}"
-            font_pt = 9
+            font_pt = 8
         else:
             text = f"{self._angle}°"
-            font_pt = 11
+            font_pt = 10
 
         f = QFont()
         f.setPointSize(font_pt)
@@ -373,13 +390,13 @@ class _SpeedometerDial(QWidget):
         p.setFont(f)
         p.setPen(color)
         # Draw text in the inner circle — nudge up slightly to leave room below
-        text_rect = QRect(rect.x(), rect.y() - 6, rect.width(), rect.height())
+        text_rect = QRect(rect.x(), rect.y() - 5, rect.width(), rect.height())
         p.drawText(text_rect, Qt.AlignCenter, text)
 
         # ── draggable knob (test mode only) ──
         if self._test_mode:
             kc = self._knob_centre()
-            kr = 6
+            kr = 5
             # outer glow ring
             p.setPen(QPen(color, 1))
             p.setBrush(Qt.NoBrush)
@@ -399,13 +416,6 @@ class _SpeedometerDial(QWidget):
             p.setBrush(QBrush(QColor(Colors.TEXT_PRIMARY)))
             p.drawEllipse(QRect(int(kc.x() - 2), int(kc.y() - 2), 4, 4))
 
-            # small "drag" hint text at the bottom
-            fh = QFont()
-            fh.setPointSize(7)
-            p.setFont(fh)
-            p.setPen(QColor(Colors.TEXT_SECONDARY))
-            p.drawText(QRect(0, h - 14, w, 14), Qt.AlignCenter, "drag")
-
         p.end()
 
 
@@ -419,7 +429,7 @@ class ServoControl(QWidget):
 
     angle_changed = pyqtSignal(int)
 
-    _DIAL_SIZE = 86
+    _DIAL_SIZE = 78
 
     def __init__(
         self,
@@ -495,8 +505,8 @@ class ServoMatrix(QWidget):
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout()
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
 
         # ── Title row ────────────────────────────────────────────────────────
         title_row = QHBoxLayout()
@@ -531,8 +541,8 @@ class ServoMatrix(QWidget):
             """
         )
         grid_layout = QGridLayout(grid_frame)
-        grid_layout.setSpacing(8)
-        grid_layout.setContentsMargins(10, 10, 10, 10)
+        grid_layout.setSpacing(6)
+        grid_layout.setContentsMargins(8, 8, 8, 8)
 
         limb_names = self.config.get_servo_param("limb_names", default=[])
         joint_names = self.config.get_servo_param("joint_names", default=[])
