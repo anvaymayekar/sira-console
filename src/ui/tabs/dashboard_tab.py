@@ -55,7 +55,7 @@ class DashboardTab(QWidget):
         self.sensors_btn.setCheckable(True)
         self.sensors_btn.setChecked(True)
 
-        self.remote_btn = QPushButton("Remote Control")
+        self.remote_btn = QPushButton("Remote")
         self.remote_btn.setCheckable(True)
 
         # Button group for exclusive selection

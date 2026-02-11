@@ -92,7 +92,7 @@ def get_main_stylesheet() -> str:
     
     QPushButton:hover {{
         background-color: {Colors.PANEL_BG};
-        border: 1px solid {Colors.TEXT_SECONDARY};
+        border: 1px solid {Colors.ACCENT_YELLOW};
     }}
     
     QPushButton:pressed {{
@@ -110,7 +110,7 @@ def get_main_stylesheet() -> str:
         border: 1px solid {Colors.ACCENT_YELLOW};
         font-weight: bold;
     }}
-    
+
     /* Labels */
     QLabel {{
         color: {Colors.TEXT_PRIMARY};

@@ -4,6 +4,7 @@ from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout
 from PyQt5.QtCore import Qt, QPointF, QRectF, pyqtSignal
 from PyQt5.QtGui import QPainter, QPen, QBrush, QColor, QPaintEvent, QMouseEvent
 from src.utils.constants import Colors
+from src.utils.constants import Dimensions
 import math
 
 
@@ -25,6 +26,21 @@ class RemoteControlJoystick(QWidget):
         self._handle_pos = QPointF(100, 100)
         self._dragging = False
         self._max_radius = 80
+        self._initialized = False
+
+    def resizeEvent(self, event) -> None:
+        """
+        Handle resize event to update center position.
+
+        Args:
+            event: Resize event
+        """
+        super().resizeEvent(event)
+        self._center = QPointF(self.width() / 2, self.height() / 2)
+        self._max_radius = min(self.width(), self.height()) / 2 - 20
+        if not self._dragging:
+            self._handle_pos = QPointF(self._center)
+        self._initialized = True
 
     def paintEvent(self, event: QPaintEvent) -> None:
         """
@@ -36,9 +52,12 @@ class RemoteControlJoystick(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        # Update center
-        self._center = QPointF(self.width() / 2, self.height() / 2)
-        self._max_radius = min(self.width(), self.height()) / 2 - 20
+        # Ensure center is initialized
+        if not self._initialized:
+            self._center = QPointF(self.width() / 2, self.height() / 2)
+            self._max_radius = min(self.width(), self.height()) / 2 - 20
+            self._handle_pos = QPointF(self._center)
+            self._initialized = True
 
         # Draw outer circle
         painter.setPen(QPen(QColor(Colors.BORDER), 2))
@@ -146,6 +165,9 @@ class RemoteControl(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(16)
 
+        # Set minimum width to match sensor display
+        self.setMinimumWidth(Dimensions.DASHBOARD_SIDEBAR)
+
         # Title
         title = QLabel("Remote Control")
         title.setStyleSheet(
@@ -159,9 +181,12 @@ class RemoteControl(QWidget):
         )
         title.setAlignment(Qt.AlignCenter)
 
-        # Joystick
+        # Joystick (centered and sized to match sensor display)
         self.joystick = RemoteControlJoystick()
-        self.joystick.position_changed.connect(self._on_position_changed)
+        self.joystick.setSizePolicy(
+            self.joystick.sizePolicy().horizontalPolicy(),
+            self.joystick.sizePolicy().verticalPolicy(),
+        )
 
         # Gait record
         gait_layout = QHBoxLayout()
@@ -170,11 +195,15 @@ class RemoteControl(QWidget):
         direction_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY};")
         self.direction_value = QLabel("Center")
         self.direction_value.setStyleSheet(f"color: {Colors.TEXT_PRIMARY};")
+        self.direction_value.setMinimumWidth(120)
+        self.direction_value.setAlignment(Qt.AlignLeft)
 
         angle_label = QLabel("Angle:")
         angle_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY};")
         self.angle_value = QLabel("0°")
         self.angle_value.setStyleSheet(f"color: {Colors.TEXT_PRIMARY};")
+        self.angle_value.setMinimumWidth(50)
+        self.angle_value.setAlignment(Qt.AlignLeft)
 
         gait_layout.addWidget(direction_label)
         gait_layout.addWidget(self.direction_value)
@@ -188,6 +217,7 @@ class RemoteControl(QWidget):
         layout.addStretch()
 
         self.setLayout(layout)
+        self.joystick.position_changed.connect(self._on_position_changed)
 
     def _on_position_changed(self, x: float, y: float) -> None:
         """

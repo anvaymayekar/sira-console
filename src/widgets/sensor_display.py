@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 from src.utils.constants import Colors
 from src.models.robot_state import SensorData
+from src.utils.constants import Dimensions
 
 
 class SensorDisplay(QWidget):
@@ -32,12 +33,18 @@ class SensorDisplay(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
+        # Set minimum width to match remote control
+        self.setMinimumWidth(Dimensions.DASHBOARD_SIDEBAR)
+
         # Power section
         power_group = self._create_group("Power")
         power_layout = QGridLayout()
+        power_layout.setColumnStretch(1, 1)
 
         self.battery_label = QLabel("0.0V")
+        self.battery_label.setMinimumWidth(60)
         self.battery_pct_label = QLabel("0%")
+        self.battery_pct_label.setMinimumWidth(50)
 
         power_layout.addWidget(QLabel("Battery:"), 0, 0)
         power_layout.addWidget(self.battery_label, 0, 1)
@@ -48,10 +55,14 @@ class SensorDisplay(QWidget):
         # IMU section
         imu_group = self._create_group("IMU Orientation")
         imu_layout = QGridLayout()
+        imu_layout.setColumnStretch(1, 1)
 
         self.imu_x_label = QLabel("0.0°")
+        self.imu_x_label.setMinimumWidth(60)
         self.imu_y_label = QLabel("0.0°")
+        self.imu_y_label.setMinimumWidth(60)
         self.imu_z_label = QLabel("0.0°")
+        self.imu_z_label.setMinimumWidth(60)
 
         imu_layout.addWidget(QLabel("X:"), 0, 0)
         imu_layout.addWidget(self.imu_x_label, 0, 1)
@@ -65,9 +76,12 @@ class SensorDisplay(QWidget):
         # Environment section
         env_group = self._create_group("Environment")
         env_layout = QGridLayout()
+        env_layout.setColumnStretch(1, 1)
 
         self.temp_label = QLabel("0.0°C")
+        self.temp_label.setMinimumWidth(60)
         self.humidity_label = QLabel("0.0%")
+        self.humidity_label.setMinimumWidth(60)
 
         env_layout.addWidget(QLabel("Temperature:"), 0, 0)
         env_layout.addWidget(self.temp_label, 0, 1)
@@ -79,9 +93,12 @@ class SensorDisplay(QWidget):
         # Measurements section
         measure_group = self._create_group("Measurements")
         measure_layout = QGridLayout()
+        measure_layout.setColumnStretch(1, 1)
 
         self.altitude_label = QLabel("0.0cm")
+        self.altitude_label.setMinimumWidth(60)
         self.distance_label = QLabel("0.0cm")
+        self.distance_label.setMinimumWidth(60)
 
         measure_layout.addWidget(QLabel("Ground Clearance:"), 0, 0)
         measure_layout.addWidget(self.altitude_label, 0, 1)
