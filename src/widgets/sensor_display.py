@@ -12,6 +12,7 @@ from PyQt5.QtCore import Qt
 from src.utils.constants import Colors
 from src.models.robot_state import SensorData
 from src.utils.constants import Dimensions
+from src.utils.constants import Fonts
 
 
 class SensorDisplay(QWidget):
@@ -26,6 +27,13 @@ class SensorDisplay(QWidget):
         """
         super().__init__(parent)
         self._setup_ui()
+
+    def _imu_sub_label(self, sub: str) -> QLabel:
+        label = QLabel(sub)
+        label.setStyleSheet(
+            f"color: {Colors.TEXT_DISABLED}; font-size:{Fonts.SIZE_SMALL}pt"
+        )
+        return label
 
     def _setup_ui(self) -> None:
         """Setup the user interface."""
@@ -66,10 +74,13 @@ class SensorDisplay(QWidget):
 
         imu_layout.addWidget(QLabel("X:"), 0, 0)
         imu_layout.addWidget(self.imu_x_label, 0, 1)
+        imu_layout.addWidget(self._imu_sub_label("roll"), 0, 2)
         imu_layout.addWidget(QLabel("Y:"), 1, 0)
         imu_layout.addWidget(self.imu_y_label, 1, 1)
+        imu_layout.addWidget(self._imu_sub_label("pitch"), 1, 2)
         imu_layout.addWidget(QLabel("Z:"), 2, 0)
         imu_layout.addWidget(self.imu_z_label, 2, 1)
+        imu_layout.addWidget(self._imu_sub_label("yaw"), 2, 2)
 
         imu_group.setLayout(imu_layout)
 
@@ -95,15 +106,20 @@ class SensorDisplay(QWidget):
         measure_layout = QGridLayout()
         measure_layout.setColumnStretch(1, 1)
 
-        self.altitude_label = QLabel("0.0cm")
+        self.altitude_label = QLabel("0.0m")
         self.altitude_label.setMinimumWidth(60)
+
+        self.ground_clearance_label = QLabel("0.0cm")
+        self.ground_clearance_label.setMinimumWidth(60)
         self.distance_label = QLabel("0.0cm")
         self.distance_label.setMinimumWidth(60)
 
-        measure_layout.addWidget(QLabel("Ground Clearance:"), 0, 0)
+        measure_layout.addWidget(QLabel("Altitude:"), 0, 0)
         measure_layout.addWidget(self.altitude_label, 0, 1)
-        measure_layout.addWidget(QLabel("Front Distance:"), 1, 0)
-        measure_layout.addWidget(self.distance_label, 1, 1)
+        measure_layout.addWidget(QLabel("Ground Clearance:"), 1, 0)
+        measure_layout.addWidget(self.ground_clearance_label, 1, 1)
+        measure_layout.addWidget(QLabel("Front Distance:"), 2, 0)
+        measure_layout.addWidget(self.distance_label, 2, 1)
 
         measure_group.setLayout(measure_layout)
 
