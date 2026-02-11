@@ -138,7 +138,7 @@ def get_main_stylesheet() -> str:
     }}
     
     QComboBox:hover {{
-        border: 1px solid {Colors.TEXT_SECONDARY};
+        border: 1px solid {Colors.ACCENT_YELLOW};
     }}
     
     QComboBox::drop-down {{
@@ -151,8 +151,24 @@ def get_main_stylesheet() -> str:
         color: {Colors.TEXT_PRIMARY};
         selection-background-color: {Colors.PANEL_BG};
         border: 1px solid {Colors.BORDER};
+        border-radius: 4px;
+        padding: 4px;
+        background-clip: padding;
+    }}
+    QComboBox QAbstractItemView::item {{
+        padding: 4px 6px;
+        border-radius: 6px;
+        border: 4px solid transparent;
+    }}
+
+    QComboBox QAbstractItemView::item:selected {{
+        background-color: {Colors.PANEL_BG};
     }}
     
+    QComboBox QAbstractItemView:focus {{
+        outline: none;
+    }}
+
     /* Slider */
     QSlider::groove:horizontal {{
         background-color: {Colors.PANEL_BG};
