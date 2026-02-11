@@ -1,4 +1,4 @@
-"""Control tab for SIRA Console."""
+"""Control tab for SIRA Console with integrated 3D visualization."""
 
 from PyQt5.QtWidgets import (
     QWidget,
@@ -10,13 +10,14 @@ from PyQt5.QtWidgets import (
     QLabel,
 )
 from PyQt5.QtCore import Qt
-from src.widgets import PoseVisualizer, ServoMatrix
+from src.widgets.pose_visualizer import PoseVisualizer
+from src.widgets.servo_matrix import ServoMatrix
 from src.core.config_loader import ConfigLoader
 from src.utils.constants import Colors
 
 
 class ControlTab(QWidget):
-    """Control tab containing 3D visualization and servo matrix."""
+    """Control tab containing 3D visualization and servo matrix with full integration."""
 
     def __init__(self, config: ConfigLoader, parent=None):
         """
@@ -30,6 +31,7 @@ class ControlTab(QWidget):
         self.config = config
         self._test_mode = False
         self._setup_ui()
+        self._connect_signals()
 
     def _setup_ui(self) -> None:
         """Setup the user interface."""
@@ -65,6 +67,24 @@ class ControlTab(QWidget):
         self.reset_btn = QPushButton("Reset")
         self.reset_btn.clicked.connect(self._reset_servos)
         self.reset_btn.setEnabled(False)
+        self.reset_btn.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {Colors.SECONDARY_BG};
+                color: {Colors.TEXT_PRIMARY};
+                border: 1px solid {Colors.BORDER};
+                padding: 5px 15px;
+                border-radius: 3px;
+            }}
+            QPushButton:hover {{
+                background-color: {Colors.BORDER};
+            }}
+            QPushButton:disabled {{
+                color: {Colors.TEXT_SECONDARY};
+                background-color: {Colors.PANEL_BG};
+            }}
+        """
+        )
 
         control_layout.addWidget(test_label)
         control_layout.addWidget(self.test_switch)
@@ -77,7 +97,8 @@ class ControlTab(QWidget):
         # Info label
         info_label = QLabel(
             "Enable Test Mode to adjust servo angles manually.\n"
-            "Values are shown in real-time when test mode is disabled."
+            "Changes are reflected in real-time in the 3D visualization.\n"
+            "The hexapod automatically adjusts its posture based on physics."
         )
         info_label.setStyleSheet(
             f"""
@@ -105,6 +126,12 @@ class ControlTab(QWidget):
         layout.addWidget(main_splitter)
 
         self.setLayout(layout)
+
+    def _connect_signals(self) -> None:
+        """Connect servo matrix to pose visualizer for real-time updates."""
+        # Connect the pose visualizer to the servo matrix
+        # This enables real-time 3D updates when servos are adjusted
+        self.pose_visualizer.connect_to_servo_matrix(self.servo_matrix)
 
     def _toggle_test_mode(self, checked: bool) -> None:
         """

@@ -19,7 +19,7 @@
             "safe_max": 140
         },
         "thigh": {
-            "default_angle": 0,
+            "default_angle": 120,
             "min_angle": 0,
             "max_angle": 180,
             "safe_min": 10,

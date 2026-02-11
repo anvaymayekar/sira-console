@@ -475,9 +475,11 @@ class ServoControl(QWidget):
     def set_test_mode(self, enabled: bool) -> None:
         self._dial.set_test_mode(enabled)
 
-    def set_angle(self, angle: int) -> None:
+    def set_angle(self, angle: int, emit_signal: bool = True) -> None:
         self._current_angle = angle
         self._dial.set_angle(angle)
+        if emit_signal:
+            self.angle_changed.emit(angle)
 
     def get_angle(self) -> int:
         return self._current_angle
@@ -599,7 +601,8 @@ class ServoMatrix(QWidget):
     def set_servo_angle(self, limb: int, joint: int, angle: int) -> None:
         index = limb + joint * 6
         if 0 <= index < len(self._servo_controls):
-            self._servo_controls[index].set_angle(angle)
+            # Don't emit signal when setting from outside to avoid loops
+            self._servo_controls[index].set_angle(angle, emit_signal=False)
 
     def get_servo_angle(self, limb: int, joint: int) -> int:
         index = limb + joint * 6
@@ -617,4 +620,8 @@ class ServoMatrix(QWidget):
             joint_config = servo_defaults.get(joint_key, {})
             default_angle = joint_config.get("default_angle", 0)
             for limb_idx in range(6):
-                self.set_servo_angle(limb_idx, joint_idx, default_angle)
+                # Use set_servo_angle which will update the dial and trigger signals
+                servo_idx = limb_idx + joint_idx * 6
+                if servo_idx < len(self._servo_controls):
+                    # This will trigger the angle_changed signal
+                    self._servo_controls[servo_idx].set_angle(default_angle)

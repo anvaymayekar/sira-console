@@ -1,7 +1,7 @@
-"""Enhanced 3D pose visualizer widget for SIRA Console."""
+"""Clean and physically accurate 3D pose visualizer for SIRA Console hexapod."""
 
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QOpenGLWidget
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPainter, QColor
 from OpenGL.GL import *
 from OpenGL.GLU import *
@@ -10,65 +10,227 @@ import math
 
 
 class PoseVisualizerGL(QOpenGLWidget):
-    """Enhanced OpenGL widget for 3D hexapod visualization."""
+    """OpenGL widget for physically accurate hexapod visualization."""
 
     def __init__(self, parent=None):
-        """
-        Initialize OpenGL visualizer.
-
-        Args:
-            parent: Parent widget
-        """
+        """Initialize OpenGL visualizer."""
         super().__init__(parent)
         self.rotation_x = 20
         self.rotation_y = 45
-        self.zoom = -25
+        self.zoom = -35
         self.last_pos = None
 
-        # Animation state
-        self.animation_phase = 0.0
-        self.leg_phases = [0, 60, 120, 180, 240, 300]  # Phase offset for each leg
+        # Servo angles for 6 legs, 3 joints each (hip, thigh, tibia)
+        # Default positions based on specifications
+        self.servo_angles = np.zeros((6, 3))
+        # Set default angles: hip=90, thigh=120, tibia=0
+        self.servo_angles[:, 0] = 90  # Hip
+        self.servo_angles[:, 1] = 120  # Thigh
+        self.servo_angles[:, 2] = 0  # Tibia
+
+        # Servo limits (min, max, default)
+        self.servo_limits = {
+            "hip": (40, 150, 90),  # Left-right rotation
+            "thigh": (0, 180, 120),  # Up-down, 0=down
+            "tibia": (0, 180, 0),  # Up-down, 0=perpendicular down
+        }
+
+        # Robot dimensions
+        self.body_radius = 4.0
+        self.body_height = 1.8
+        self.hip_length = 1.4
+        self.thigh_length = 3.0
+        self.tibia_length = 3.2
+
+        # Calculate ground offset
+        self._calculate_ground_offset()
+
+    def _calculate_ground_offset(self):
+        """Calculate the Y offset needed to place the hexapod on the ground plane."""
+        # Find the lowest foot position in the current pose
+        min_y = float("inf")
+
+        for leg_idx in range(6):
+            _, foot_pos = self._calculate_leg_endpoints(
+                leg_idx,
+                self.servo_angles[leg_idx, 0],
+                self.servo_angles[leg_idx, 1],
+                self.servo_angles[leg_idx, 2],
+            )
+            if foot_pos[1] < min_y:
+                min_y = foot_pos[1]
+
+        # Ground plane is at y = -3.0
+        # Offset needed to place the lowest foot exactly on the ground
+        # If min_y = -5, and ground is -3, we need to lift by 2 (offset = +2)
+        # offset = ground_y - min_y
+        self.ground_offset = -3.0 - min_y
+        # print(f"DEBUG: min_y={min_y:.2f}, ground_offset={self.ground_offset:.2f}")
+
+    def _calculate_leg_endpoints(self, leg_idx, hip_angle, thigh_angle, tibia_angle):
+        """Calculate the 3D positions of leg joints given servo angles.
+
+        Servo angle definitions:
+        - Hip: 90° is neutral (straight out), angles rotate left-right
+        - Thigh: 0° points straight down, 180° points straight up
+        - Tibia: 0° is perpendicular down from thigh, 180° is perpendicular up from thigh
+        """
+        leg_base_angle = leg_idx * 60  # Degrees around body
+
+        # Convert to radians
+        leg_rad = math.radians(leg_base_angle)
+        hip_rad = math.radians(hip_angle - 90)  # Offset so 90° is neutral
+
+        # Thigh: 0° = down (-90° in math), 180° = up (+90° in math)
+        # So thigh_angle maps: 0→-90, 90→0, 180→+90
+        thigh_math_angle = thigh_angle - 90
+        thigh_rad = math.radians(thigh_math_angle)
+
+        # Tibia: 0° = perpendicular down from thigh, 180° = perpendicular up
+        # This is relative to the thigh, so 0° adds -90° to thigh angle
+        tibia_math_angle = tibia_angle - 90
+        tibia_rad = math.radians(tibia_math_angle)
+
+        # Starting position at body vertex
+        start_x = self.body_radius * math.cos(leg_rad)
+        start_z = self.body_radius * math.sin(leg_rad)
+        start_y = 0
+
+        # Rotate to leg's coordinate frame
+        cos_leg = math.cos(leg_rad)
+        sin_leg = math.sin(leg_rad)
+
+        # Hip servo + joint (0.3 + 0.8 + 0.5 sphere = 1.6 units out)
+        hip_servo_extend = 1.6
+
+        # Hip extends outward from body with rotation
+        hip_base_x = start_x + cos_leg * hip_servo_extend
+        hip_base_z = start_z + sin_leg * hip_servo_extend
+        hip_base_y = start_y
+
+        # Hip rotation affects the direction of the hip link
+        hip_link_x = self.hip_length * math.cos(hip_rad)
+        hip_link_y = self.hip_length * math.sin(hip_rad)
+
+        # Hip joint is at the end of the hip servo
+        hip_x = hip_base_x + cos_leg * hip_link_x
+        hip_z = hip_base_z + sin_leg * hip_link_x
+        hip_y = hip_base_y + hip_link_y
+
+        # Thigh extends from hip joint
+        # Account for both the hip rotation plane and thigh angle
+        thigh_local_x = self.thigh_length * math.cos(hip_rad) * math.cos(thigh_rad)
+        thigh_local_z = self.thigh_length * math.sin(hip_rad) * math.cos(thigh_rad)
+        thigh_local_y = self.thigh_length * math.sin(thigh_rad)
+
+        thigh_x = hip_x + thigh_local_x
+        thigh_z = hip_z + thigh_local_z
+        thigh_y = hip_y + thigh_local_y
+
+        # Tibia continues from thigh
+        # Combined angle of thigh + tibia (both relative to horizontal)
+        combined_angle_rad = thigh_rad + tibia_rad
+
+        tibia_local_x = (
+            self.tibia_length * math.cos(hip_rad) * math.cos(combined_angle_rad)
+        )
+        tibia_local_z = (
+            self.tibia_length * math.sin(hip_rad) * math.cos(combined_angle_rad)
+        )
+        tibia_local_y = self.tibia_length * math.sin(combined_angle_rad)
+
+        foot_x = thigh_x + tibia_local_x
+        foot_z = thigh_z + tibia_local_z
+        foot_y = thigh_y + tibia_local_y
+
+        hip_pos = np.array([hip_x, hip_y, hip_z])
+        thigh_pos = np.array([thigh_x, thigh_y, thigh_z])
+        foot_pos = np.array([foot_x, foot_y, foot_z])
+
+        return (hip_pos, thigh_pos, foot_pos), foot_pos
+
+    def _calculate_body_tilt(self):
+        """Calculate body tilt based on foot positions - physically realistic."""
+        # Get all foot positions in world space (before ground offset is applied)
+        foot_positions = []
+        foot_heights = []
+
+        for leg_idx in range(6):
+            _, foot_pos = self._calculate_leg_endpoints(
+                leg_idx,
+                self.servo_angles[leg_idx, 0],
+                self.servo_angles[leg_idx, 1],
+                self.servo_angles[leg_idx, 2],
+            )
+            foot_positions.append(foot_pos)
+            foot_heights.append(foot_pos[1])
+
+        foot_positions = np.array(foot_positions)
+
+        # If all feet are at roughly the same height, no tilt needed
+        height_variance = np.var(foot_heights)
+        if height_variance < 0.1:  # All feet roughly level
+            return 0, 0, 0
+
+        # Calculate which feet would be on the ground
+        # The ground touches the lowest foot(s)
+        min_height = min(foot_heights)
+        ground_tolerance = 0.3  # Feet within this distance are "on ground"
+
+        on_ground = []
+        ground_feet_pos = []
+        for i, h in enumerate(foot_heights):
+            if abs(h - min_height) < ground_tolerance:
+                on_ground.append(i)
+                ground_feet_pos.append(foot_positions[i])
+
+        # Need at least 3 feet for stable support
+        if len(on_ground) < 3:
+            # Unstable - use all feet
+            ground_feet_pos = foot_positions
+
+        ground_feet_pos = np.array(ground_feet_pos)
+
+        # Calculate the center of the support polygon
+        support_center_x = np.mean(ground_feet_pos[:, 0])
+        support_center_z = np.mean(ground_feet_pos[:, 2])
+
+        # Body should tilt toward the support center
+        # Small tilt proportional to offset from center
+        tilt_z = -np.degrees(np.arctan2(support_center_x, 15))  # Roll (around Z)
+        tilt_x = np.degrees(np.arctan2(support_center_z, 15))  # Pitch (around X)
+
+        # Limit maximum tilt to reasonable values
+        tilt_x = np.clip(tilt_x, -20, 20)
+        tilt_z = np.clip(tilt_z, -20, 20)
+
+        return tilt_x, 0, tilt_z
 
     def initializeGL(self) -> None:
-        """Initialize OpenGL with enhanced settings."""
-        glClearColor(0.08, 0.08, 0.10, 1.0)  # Darker blue-tinted background
+        """Initialize OpenGL."""
+        glClearColor(0.06, 0.06, 0.08, 1.0)
         glEnable(GL_DEPTH_TEST)
         glEnable(GL_LIGHTING)
         glEnable(GL_LIGHT0)
         glEnable(GL_LIGHT1)
         glEnable(GL_COLOR_MATERIAL)
         glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE)
-
-        # Smooth shading
         glShadeModel(GL_SMOOTH)
         glEnable(GL_NORMALIZE)
 
-        # Anti-aliasing hints
-        glEnable(GL_LINE_SMOOTH)
-        glEnable(GL_POLYGON_SMOOTH)
-        glHint(GL_LINE_SMOOTH_HINT, GL_NICEST)
-        glHint(GL_POLYGON_SMOOTH_HINT, GL_NICEST)
-
-        # Main light (key light)
-        glLightfv(GL_LIGHT0, GL_POSITION, [10.0, 15.0, 10.0, 1.0])
-        glLightfv(GL_LIGHT0, GL_AMBIENT, [0.3, 0.3, 0.35, 1.0])
-        glLightfv(GL_LIGHT0, GL_DIFFUSE, [1.0, 1.0, 0.95, 1.0])
+        # Clean lighting
+        glLightfv(GL_LIGHT0, GL_POSITION, [8.0, 12.0, 8.0, 1.0])
+        glLightfv(GL_LIGHT0, GL_AMBIENT, [0.4, 0.4, 0.45, 1.0])
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, [1.0, 1.0, 1.0, 1.0])
         glLightfv(GL_LIGHT0, GL_SPECULAR, [0.8, 0.8, 0.8, 1.0])
 
-        # Fill light
-        glLightfv(GL_LIGHT1, GL_POSITION, [-5.0, 5.0, -5.0, 1.0])
-        glLightfv(GL_LIGHT1, GL_AMBIENT, [0.1, 0.1, 0.15, 1.0])
-        glLightfv(GL_LIGHT1, GL_DIFFUSE, [0.4, 0.4, 0.5, 1.0])
-        glLightfv(GL_LIGHT1, GL_SPECULAR, [0.2, 0.2, 0.2, 1.0])
+        glLightfv(GL_LIGHT1, GL_POSITION, [-6.0, 8.0, -6.0, 1.0])
+        glLightfv(GL_LIGHT1, GL_AMBIENT, [0.2, 0.2, 0.25, 1.0])
+        glLightfv(GL_LIGHT1, GL_DIFFUSE, [0.5, 0.5, 0.6, 1.0])
+        glLightfv(GL_LIGHT1, GL_SPECULAR, [0.3, 0.3, 0.3, 1.0])
 
     def resizeGL(self, w: int, h: int) -> None:
-        """
-        Handle resize.
-
-        Args:
-            w: Width
-            h: Height
-        """
+        """Handle resize."""
         glViewport(0, 0, w, h)
         glMatrixMode(GL_PROJECTION)
         glLoadIdentity()
@@ -76,215 +238,266 @@ class PoseVisualizerGL(QOpenGLWidget):
         glMatrixMode(GL_MODELVIEW)
 
     def paintGL(self) -> None:
-        """Paint enhanced OpenGL scene."""
+        """Paint OpenGL scene."""
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         glLoadIdentity()
 
-        # Camera position
-        glTranslatef(0.0, -2.0, self.zoom)
+        glTranslatef(0.0, -1.5, self.zoom)
         glRotatef(self.rotation_x, 1.0, 0.0, 0.0)
         glRotatef(self.rotation_y, 0.0, 1.0, 0.0)
 
-        # Draw ground plane for reference
         self._draw_ground_plane()
 
-        # Draw hexapod
+        # Apply ground offset and physics-based tilt
+        glPushMatrix()
+        glTranslatef(0.0, self.ground_offset, 0.0)
+
+        # Apply body tilt for non-alternate tripod stances
+        tilt_x, tilt_y, tilt_z = self._calculate_body_tilt()
+        glRotatef(tilt_x, 1.0, 0.0, 0.0)
+        glRotatef(tilt_z, 0.0, 0.0, 1.0)
+
         self._draw_hexapod()
+        glPopMatrix()
 
     def _draw_ground_plane(self) -> None:
-        """Draw a subtle ground plane grid."""
+        """Draw simple ground plane."""
         glDisable(GL_LIGHTING)
-        glColor4f(0.15, 0.15, 0.2, 0.3)
 
-        grid_size = 30
+        grid_size = 24
         grid_spacing = 2.0
 
+        # Center lines
+        glLineWidth(2.0)
+        glColor4f(0.25, 0.3, 0.35, 0.6)
         glBegin(GL_LINES)
-        for i in range(-grid_size // 2, grid_size // 2 + 1):
-            x = i * grid_spacing
-            # Lines parallel to X axis
-            glVertex3f(-grid_size * grid_spacing / 2, -3.5, x)
-            glVertex3f(grid_size * grid_spacing / 2, -3.5, x)
-            # Lines parallel to Z axis
-            glVertex3f(x, -3.5, -grid_size * grid_spacing / 2)
-            glVertex3f(x, -3.5, grid_size * grid_spacing / 2)
+        glVertex3f(-grid_size * grid_spacing / 2, -3.0, 0)
+        glVertex3f(grid_size * grid_spacing / 2, -3.0, 0)
+        glVertex3f(0, -3.0, -grid_size * grid_spacing / 2)
+        glVertex3f(0, -3.0, grid_size * grid_spacing / 2)
         glEnd()
 
+        # Regular grid
+        glLineWidth(1.0)
+        glColor4f(0.15, 0.15, 0.22, 0.35)
+        glBegin(GL_LINES)
+        for i in range(-grid_size // 2, grid_size // 2 + 1):
+            if i == 0:
+                continue
+            x = i * grid_spacing
+            glVertex3f(-grid_size * grid_spacing / 2, -3.0, x)
+            glVertex3f(grid_size * grid_spacing / 2, -3.0, x)
+            glVertex3f(x, -3.0, -grid_size * grid_spacing / 2)
+            glVertex3f(x, -3.0, grid_size * grid_spacing / 2)
+        glEnd()
+
+        glLineWidth(1.0)
         glEnable(GL_LIGHTING)
 
     def _draw_hexapod(self) -> None:
-        """Draw realistic hexapod robot with black chassis and yellow legs."""
-        # Draw main body (black chassis)
+        """Draw hexapod robot with current servo positions."""
         self._draw_chassis()
 
-        # Draw 6 legs (yellow)
-        leg_angles = [30, 90, 150, 210, 270, 330]
-
-        for i, leg_angle in enumerate(leg_angles):
+        # Draw all 6 legs with their current servo angles
+        for leg_idx in range(6):
+            leg_angle = leg_idx * 60
             glPushMatrix()
             glRotatef(leg_angle, 0.0, 1.0, 0.0)
-            self._draw_leg(i)
+            self._draw_leg(
+                leg_idx,
+                self.servo_angles[leg_idx, 0],  # Hip
+                self.servo_angles[leg_idx, 1],  # Thigh
+                self.servo_angles[leg_idx, 2],  # Tibia
+            )
             glPopMatrix()
 
     def _draw_chassis(self) -> None:
-        """Draw hexagonal chassis (black)."""
-        # Set material properties for black plastic
-        glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, [0.05, 0.05, 0.05, 1.0])
+        """Draw proper hexagonal chassis with concave sides - FIXED."""
+        # Black chassis material
+        glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, [0.08, 0.08, 0.08, 1.0])
         glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, [0.15, 0.15, 0.15, 1.0])
-        glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, [0.3, 0.3, 0.3, 1.0])
-        glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 32.0)
+        glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, [0.5, 0.5, 0.5, 1.0])
+        glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 60.0)
+        glColor3f(0.12, 0.12, 0.12)
 
-        glColor3f(0.1, 0.1, 0.1)  # Dark black/gray
+        body_radius = self.body_radius
+        body_height = self.body_height
+        curve_depth = 0.8
+        curve_segments = 24
 
-        body_radius = 3.5
-        body_height = 1.2
-        num_sides = 6
-
-        # Top surface
-        glBegin(GL_POLYGON)
-        glNormal3f(0.0, 1.0, 0.0)
-        for i in range(num_sides):
-            angle = i * 60 * math.pi / 180
-            x = body_radius * math.cos(angle)
-            z = body_radius * math.sin(angle)
-            glVertex3f(x, body_height / 2, z)
-        glEnd()
-
-        # Bottom surface
-        glBegin(GL_POLYGON)
-        glNormal3f(0.0, -1.0, 0.0)
-        for i in range(num_sides - 1, -1, -1):
-            angle = i * 60 * math.pi / 180
-            x = body_radius * math.cos(angle)
-            z = body_radius * math.sin(angle)
-            glVertex3f(x, -body_height / 2, z)
-        glEnd()
-
-        # Side panels with beveled edges
-        for i in range(num_sides):
+        # Generate all points for the hexagon with concave sides
+        all_points = []
+        for i in range(6):
             angle1 = i * 60 * math.pi / 180
-            angle2 = ((i + 1) % num_sides) * 60 * math.pi / 180
+            angle2 = (i + 1) * 60 * math.pi / 180
 
+            # Vertices
             x1 = body_radius * math.cos(angle1)
             z1 = body_radius * math.sin(angle1)
             x2 = body_radius * math.cos(angle2)
             z2 = body_radius * math.sin(angle2)
 
-            # Calculate normal for this face
-            dx = x2 - x1
-            dz = z2 - z1
-            normal_x = -dz
-            normal_z = dx
-            length = math.sqrt(normal_x**2 + normal_z**2)
+            # Control point for concave curve
+            mid_angle = (angle1 + angle2) / 2
+            mid_x = (body_radius - curve_depth) * math.cos(mid_angle)
+            mid_z = (body_radius - curve_depth) * math.sin(mid_angle)
+
+            # Generate curve points
+            for j in range(curve_segments):
+                t = j / curve_segments
+                x = (1 - t) ** 2 * x1 + 2 * (1 - t) * t * mid_x + t**2 * x2
+                z = (1 - t) ** 2 * z1 + 2 * (1 - t) * t * mid_z + t**2 * z2
+                all_points.append((x, z))
+
+        num_points = len(all_points)
+
+        # Draw top surface
+        glBegin(GL_TRIANGLE_FAN)
+        glNormal3f(0.0, 1.0, 0.0)
+        glVertex3f(0.0, body_height / 2, 0.0)
+        for x, z in all_points:
+            glVertex3f(x, body_height / 2, z)
+        # Close the loop
+        glVertex3f(all_points[0][0], body_height / 2, all_points[0][1])
+        glEnd()
+
+        # Draw bottom surface
+        glBegin(GL_TRIANGLE_FAN)
+        glNormal3f(0.0, -1.0, 0.0)
+        glVertex3f(0.0, -body_height / 2, 0.0)
+        for x, z in reversed(all_points):
+            glVertex3f(x, -body_height / 2, z)
+        # Close the loop
+        glVertex3f(all_points[-1][0], -body_height / 2, all_points[-1][1])
+        glEnd()
+
+        # Draw side surface - PROPERLY CLOSED
+        glBegin(GL_QUAD_STRIP)
+        for i in range(num_points + 1):  # +1 to close the loop
+            idx = i % num_points
+            x, z = all_points[idx]
+
+            # Calculate normal
+            prev_idx = (idx - 1) % num_points
+            next_idx = (idx + 1) % num_points
+
+            prev_x, prev_z = all_points[prev_idx]
+            next_x, next_z = all_points[next_idx]
+
+            tx = next_x - prev_x
+            tz = next_z - prev_z
+
+            nx = -tz
+            nz = tx
+            length = math.sqrt(nx**2 + nz**2)
             if length > 0:
-                normal_x /= length
-                normal_z /= length
+                nx /= length
+                nz /= length
 
-            glBegin(GL_QUADS)
-            glNormal3f(normal_x, 0.0, normal_z)
-            glVertex3f(x1, body_height / 2, z1)
-            glVertex3f(x2, body_height / 2, z2)
-            glVertex3f(x2, -body_height / 2, z2)
-            glVertex3f(x1, -body_height / 2, z1)
-            glEnd()
+            glNormal3f(nx, 0.0, nz)
+            glVertex3f(x, body_height / 2, z)
+            glVertex3f(x, -body_height / 2, z)
+        glEnd()
 
-        # Central hub detail
-        glColor3f(0.08, 0.08, 0.08)
-        self._draw_cylinder_at(0, 0, 0, 0.8, body_height + 0.2, axis="y")
-
-    def _draw_leg(self, leg_index: int) -> None:
+    def _draw_leg(
+        self, leg_idx: int, hip_angle: float, thigh_angle: float, tibia_angle: float
+    ) -> None:
         """
-        Draw a single articulated leg with yellow color.
-
-        Args:
-            leg_index: Index of the leg (0-5)
+        Draw leg with servo-controlled joints.
+        Hip: 40-150° (default 90°) - left-right rotation
+        Thigh: 0-180° (default 120°) - 0° points down, 180° points up
+        Tibia: 0-180° (default 0°) - 0° perpendicular down from thigh, 180° perpendicular up
         """
-        # Set material properties for yellow plastic/metal
-        glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, [0.3, 0.25, 0.0, 1.0])
-        glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, [1.0, 0.85, 0.1, 1.0])
-        glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, [0.8, 0.8, 0.4, 1.0])
-        glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 64.0)
 
-        glColor3f(1.0, 0.85, 0.1)  # Bright yellow
+        # Yellow material for links
+        def set_yellow_material():
+            glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, [0.35, 0.3, 0.0, 1.0])
+            glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, [1.0, 0.9, 0.15, 1.0])
+            glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, [0.8, 0.8, 0.4, 1.0])
+            glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 70.0)
 
-        # Animation parameters
-        phase = (self.animation_phase + self.leg_phases[leg_index]) * math.pi / 180
-        coxa_angle = math.sin(phase) * 5
-        femur_angle = -30 + math.sin(phase) * 10
-        tibia_angle = -60 + math.cos(phase) * 15
+        # Black material for servos
+        def set_black_material():
+            glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, [0.05, 0.05, 0.05, 1.0])
+            glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, [0.12, 0.12, 0.12, 1.0])
+            glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, [0.4, 0.4, 0.4, 1.0])
+            glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 50.0)
 
-        # Coxa (hip joint)
+        vertex_radius = self.body_radius
+        glTranslatef(vertex_radius, 0.0, 0.0)
+
         glPushMatrix()
-        glTranslatef(3.5, 0.0, 0.0)
+
+        # === HIP SERVO (black, allows left-right rotation) ===
+        set_black_material()
+        glColor3f(0.12, 0.12, 0.12)
+        glTranslatef(0.3, 0.0, 0.0)
+        self._draw_cylinder(0.0, 0.0, 0.0, 0.6, 0.8, axis="x")
 
         # Hip joint sphere
-        glColor3f(0.2, 0.2, 0.2)
-        self._draw_sphere(0.4)
-
-        glColor3f(1.0, 0.85, 0.1)
-        glRotatef(coxa_angle, 0.0, 1.0, 0.0)
-
-        # Coxa segment
-        glPushMatrix()
         glTranslatef(0.8, 0.0, 0.0)
-        self._draw_cylinder_at(-0.8, 0, 0, 0.35, 1.6, axis="x")
-        glPopMatrix()
+        self._draw_sphere(0.5)
 
-        # Femur (thigh)
-        glTranslatef(1.6, 0.0, 0.0)
+        # Apply hip rotation (offset by 90 for neutral position)
+        glRotatef(hip_angle - 90, 0.0, 1.0, 0.0)
+
+        # === HIP LINK (yellow) ===
+        set_yellow_material()
+        glColor3f(1.0, 0.9, 0.15)
+        # Start right after hip joint sphere
+        glTranslatef(0.5, 0.0, 0.0)
+        self._draw_cylinder(0.0, 0.0, 0.0, 0.45, self.hip_length, axis="x")
+
+        # === THIGH SERVO (black, allows up-down rotation) ===
+        # Move to end of hip link
+        glTranslatef(self.hip_length, 0.0, 0.0)
+        set_black_material()
+        glColor3f(0.12, 0.12, 0.12)
+
+        # Thigh joint sphere
+        self._draw_sphere(0.55)
+
+        # Apply thigh rotation: 0° down, 180° up
+        # In OpenGL: 0° servo = -90° rotation (pointing down)
+        #            90° servo = 0° rotation (horizontal)
+        #            180° servo = +90° rotation (pointing up)
+        glRotatef(thigh_angle - 90, 0.0, 0.0, 1.0)
+
+        # === THIGH LINK (yellow, fat part) ===
+        set_yellow_material()
+        glColor3f(1.0, 0.9, 0.15)
+        # Start right after thigh joint sphere
+        glTranslatef(0.6, 0.0, 0.0)
+        self._draw_cylinder(0.0, 0.0, 0.0, 0.65, self.thigh_length, axis="x")
+
+        # === KNEE SERVO (black) ===
+        glTranslatef(self.thigh_length, 0.0, 0.0)
+        set_black_material()
+        glColor3f(0.12, 0.12, 0.12)
 
         # Knee joint sphere
-        glColor3f(0.2, 0.2, 0.2)
-        self._draw_sphere(0.35)
+        self._draw_sphere(0.6)
 
-        glColor3f(1.0, 0.85, 0.1)
-        glRotatef(femur_angle, 0.0, 0.0, 1.0)
+        # Apply tibia rotation: 0° perpendicular down from thigh, 180° perpendicular up
+        # Same mapping as thigh
+        glRotatef(tibia_angle - 90, 0.0, 0.0, 1.0)
 
-        # Femur segment
-        glPushMatrix()
-        glTranslatef(1.2, 0.0, 0.0)
-        self._draw_cylinder_at(-1.2, 0, 0, 0.3, 2.4, axis="x")
-        glPopMatrix()
-
-        # Tibia (shin)
-        glTranslatef(2.4, 0.0, 0.0)
-
-        # Ankle joint sphere
-        glColor3f(0.2, 0.2, 0.2)
-        self._draw_sphere(0.3)
-
-        glColor3f(1.0, 0.85, 0.1)
-        glRotatef(tibia_angle, 0.0, 0.0, 1.0)
-
-        # Tibia segment
-        glPushMatrix()
-        glTranslatef(1.2, 0.0, 0.0)
-        self._draw_cylinder_at(-1.2, 0, 0, 0.25, 2.4, axis="x")
-        glPopMatrix()
-
-        # Foot
-        glTranslatef(2.4, 0.0, 0.0)
-        glColor3f(0.15, 0.15, 0.15)
-        self._draw_sphere(0.35)
+        # === TIBIA (yellow, curved trunk-like) ===
+        set_yellow_material()
+        glColor3f(1.0, 0.9, 0.15)
+        glTranslatef(0.6, 0.0, 0.0)
+        self._draw_curved_tibia(self.tibia_length, 0.55, 0.35)
 
         glPopMatrix()
 
-    def _draw_sphere(self, radius: float, slices: int = 16, stacks: int = 16) -> None:
-        """
-        Draw a sphere.
-
-        Args:
-            radius: Sphere radius
-            slices: Number of slices
-            stacks: Number of stacks
-        """
+    def _draw_sphere(self, radius: float) -> None:
+        """Draw a simple smooth sphere."""
         quadric = gluNewQuadric()
         gluQuadricNormals(quadric, GLU_SMOOTH)
-        gluQuadricTexture(quadric, GL_TRUE)
-        gluSphere(quadric, radius, slices, stacks)
+        gluSphere(quadric, radius, 20, 20)
         gluDeleteQuadric(quadric)
 
-    def _draw_cylinder_at(
+    def _draw_cylinder(
         self,
         x: float,
         y: float,
@@ -292,47 +505,101 @@ class PoseVisualizerGL(QOpenGLWidget):
         radius: float,
         length: float,
         axis: str = "x",
-        slices: int = 16,
     ) -> None:
-        """
-        Draw a cylinder at a specific position along an axis.
-
-        Args:
-            x, y, z: Position
-            radius: Cylinder radius
-            length: Cylinder length
-            axis: Axis to align along ('x', 'y', or 'z')
-            slices: Number of slices for smoothness
-        """
+        """Draw a simple cylinder."""
         quadric = gluNewQuadric()
         gluQuadricNormals(quadric, GLU_SMOOTH)
-        gluQuadricTexture(quadric, GL_TRUE)
 
         glPushMatrix()
         glTranslatef(x, y, z)
 
         if axis == "x":
-            glRotatef(90, 0.0, 1.0, 0.0)
+            glRotatef(90, 0, 1, 0)
         elif axis == "y":
-            glRotatef(-90, 1.0, 0.0, 0.0)
-        # 'z' is default orientation
+            glRotatef(-90, 1, 0, 0)
 
-        gluCylinder(quadric, radius, radius, length, slices, 1)
+        gluCylinder(quadric, radius, radius, length, 20, 1)
 
-        # Draw caps
-        gluDisk(quadric, 0, radius, slices, 1)
+        # Caps
+        gluDisk(quadric, 0, radius, 20, 1)
         glTranslatef(0, 0, length)
-        gluDisk(quadric, 0, radius, slices, 1)
+        gluDisk(quadric, 0, radius, 20, 1)
 
         glPopMatrix()
         gluDeleteQuadric(quadric)
+
+    def _draw_curved_tibia(
+        self, length: float, radius_start: float, radius_end: float
+    ) -> None:
+        """Draw elegant curved tibia like a trunk."""
+        segments = 30
+        curve_angle = 25  # degrees of curve
+
+        glPushMatrix()
+
+        for i in range(segments):
+            t = i / segments
+            t_next = (i + 1) / segments
+
+            # Position along curve
+            x = length * t
+            x_next = length * t_next
+
+            # Downward curve
+            y = -length * t * math.sin(curve_angle * math.pi / 180) * 0.4
+            y_next = -length * t_next * math.sin(curve_angle * math.pi / 180) * 0.4
+
+            # Radius taper
+            r = radius_start + (radius_end - radius_start) * t
+            r_next = radius_start + (radius_end - radius_start) * t_next
+
+            # Draw segment
+            glPushMatrix()
+            glTranslatef(x, y, 0)
+
+            # Calculate rotation for smooth curve
+            dx = x_next - x
+            dy = y_next - y
+            angle = math.atan2(dy, dx) * 180 / math.pi
+
+            glRotatef(angle, 0, 0, 1)
+
+            quadric = gluNewQuadric()
+            gluQuadricNormals(quadric, GLU_SMOOTH)
+
+            segment_length = math.sqrt(dx**2 + dy**2)
+            glRotatef(90, 0, 1, 0)
+            gluCylinder(quadric, r, r_next, segment_length, 20, 1)
+
+            gluDeleteQuadric(quadric)
+            glPopMatrix()
+
+        glPopMatrix()
+
+    def set_servo_angle(self, leg: int, joint: int, angle: float) -> None:
+        """Set servo angle for a specific leg and joint."""
+        if 0 <= leg < 6 and 0 <= joint < 3:
+            # Clamp angle to limits
+            joint_names = ["hip", "thigh", "tibia"]
+            min_ang, max_ang, _ = self.servo_limits[joint_names[joint]]
+            angle = max(min_ang, min(max_ang, angle))
+
+            self.servo_angles[leg, joint] = angle
+            self._calculate_ground_offset()  # Recalculate ground offset
+            self.update()
+
+    def get_servo_angle(self, leg: int, joint: int) -> float:
+        """Get servo angle for a specific leg and joint."""
+        if 0 <= leg < 6 and 0 <= joint < 3:
+            return self.servo_angles[leg, joint]
+        return 0.0
 
     def mousePressEvent(self, event) -> None:
         """Handle mouse press."""
         self.last_pos = event.pos()
 
     def mouseMoveEvent(self, event) -> None:
-        """Handle mouse move for rotation."""
+        """Handle mouse move."""
         if self.last_pos is not None:
             dx = event.x() - self.last_pos.x()
             dy = event.y() - self.last_pos.y()
@@ -340,40 +607,26 @@ class PoseVisualizerGL(QOpenGLWidget):
             if event.buttons() & Qt.LeftButton:
                 self.rotation_y += dx * 0.5
                 self.rotation_x += dy * 0.5
-                # Clamp rotation_x to prevent flipping
                 self.rotation_x = max(-89, min(89, self.rotation_x))
                 self.update()
 
             self.last_pos = event.pos()
 
     def wheelEvent(self, event) -> None:
-        """Handle mouse wheel for zoom."""
+        """Handle mouse wheel."""
         delta = event.angleDelta().y()
         self.zoom += delta / 60.0
         self.zoom = max(-60, min(-10, self.zoom))
         self.update()
 
-    def update_animation(self, phase: float) -> None:
-        """
-        Update animation phase.
-
-        Args:
-            phase: Animation phase in degrees
-        """
-        self.animation_phase = phase
-        self.update()
-
 
 class PoseVisualizer(QWidget):
-    """Enhanced 3D pose visualizer widget."""
+    """Pose visualizer widget that integrates with ServoMatrix."""
+
+    servo_angle_changed = pyqtSignal(int, int, float)  # leg, joint, angle
 
     def __init__(self, parent=None):
-        """
-        Initialize pose visualizer.
-
-        Args:
-            parent: Parent widget
-        """
+        """Initialize pose visualizer."""
         super().__init__(parent)
         self._setup_ui()
 
@@ -383,58 +636,66 @@ class PoseVisualizer(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Title bar with enhanced styling
         title = QLabel("3D Pose Visualization")
         title.setStyleSheet(
             """
             QLabel {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #2a2a2a, stop:1 #1a1a1a);
+                    stop:0 #2d2d2d, stop:1 #1a1a1a);
                 color: #ffd700;
-                padding: 10px;
-                font-size: 11pt;
+                padding: 12px;
+                font-size: 12pt;
                 font-weight: bold;
-                border: 1px solid #3a3a3a;
-                border-radius: 0px;
-                border-bottom: 2px solid #ffd700;
+                border: 1px solid #404040;
+                border-bottom: 3px solid #ffd700;
             }
         """
         )
 
-        # OpenGL widget
         self.gl_widget = PoseVisualizerGL()
-        self.gl_widget.setMinimumSize(500, 500)
+        self.gl_widget.setMinimumSize(600, 600)
         self.gl_widget.setStyleSheet(
             """
             QOpenGLWidget {
-                border: 1px solid #3a3a3a;
-                background-color: #0a0a0c;
+                border: 1px solid #404040;
+                background-color: #060608;
             }
         """
         )
-
-        # Animation timer
-        self.animation_timer = QTimer()
-        self.animation_timer.timeout.connect(self._animate)
-        self.animation_timer.start(33)  # ~30 FPS
-
-        self.animation_phase = 0.0
 
         layout.addWidget(title)
         layout.addWidget(self.gl_widget, 1)
 
         self.setLayout(layout)
 
-    def _animate(self) -> None:
-        """Animate the visualization."""
-        # Smooth walking animation
-        self.animation_phase += 1.5
-        if self.animation_phase >= 360:
-            self.animation_phase -= 360
+    def set_servo_angle(self, leg: int, joint: int, angle: float) -> None:
+        """Set servo angle (called from ServoMatrix)."""
+        self.gl_widget.set_servo_angle(leg, joint, angle)
 
-        self.gl_widget.update_animation(self.animation_phase)
+    def get_servo_angle(self, leg: int, joint: int) -> float:
+        """Get servo angle."""
+        return self.gl_widget.get_servo_angle(leg, joint)
 
-        # Subtle automatic rotation
-        self.gl_widget.rotation_y += 0.3
-        if self.gl_widget.rotation_y >= 360:
-            self.gl_widget.rotation_y -= 360
+    def connect_to_servo_matrix(self, servo_matrix) -> None:
+        """Connect this visualizer to a ServoMatrix widget."""
+        # Store reference to servo matrix
+        self._servo_matrix = servo_matrix
+
+        # Connect each servo control to update the visualizer
+        for limb_idx in range(6):
+            for joint_idx in range(3):
+                servo_idx = limb_idx + joint_idx * 6
+                if servo_idx < len(servo_matrix._servo_controls):
+                    servo = servo_matrix._servo_controls[servo_idx]
+
+                    # Use a proper lambda that captures the current values
+                    def make_handler(l, j):
+                        return lambda angle: self.set_servo_angle(l, j, angle)
+
+                    servo.angle_changed.connect(make_handler(limb_idx, joint_idx))
+
+        # Initialize visualizer with current servo positions
+        for limb_idx in range(6):
+            for joint_idx in range(3):
+                angle = servo_matrix.get_servo_angle(limb_idx, joint_idx)
+                self.set_servo_angle(limb_idx, joint_idx, angle)
