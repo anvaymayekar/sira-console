@@ -1,6 +1,6 @@
 """Remote control widget for SIRA Console."""
 
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton
 from PyQt5.QtCore import Qt, QPointF, QRectF, pyqtSignal
 from PyQt5.QtGui import QPainter, QPen, QBrush, QColor, QPaintEvent, QMouseEvent
 from src.utils.constants import Colors
@@ -213,6 +213,61 @@ class RemoteControl(QWidget):
 
         layout.addWidget(title)
         layout.addWidget(self.joystick, 1)
+
+        # Control buttons
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(8)
+
+        self.stall_btn = QPushButton("▲  Stall")
+        self.stall_btn.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {Colors.SECONDARY_BG};
+                color: {Colors.TEXT_PRIMARY};
+                border: 1px solid {Colors.BORDER};
+                border-radius: 4px;
+                padding: 4px 16px;
+                font-family: {Colors.TEXT_SECONDARY};
+                font-size: 9pt;
+            }}
+            QPushButton:hover {{
+                background-color: {Colors.PANEL_BG};
+                border: 1px solid {Colors.STATUS_GREEN};
+            }}
+            QPushButton:pressed {{
+                background-color: {Colors.STATUS_GREEN};
+                color: {Colors.PRIMARY_BG};
+            }}
+        """
+        )
+
+        self.rest_btn = QPushButton("▼  Rest")
+        self.rest_btn.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {Colors.SECONDARY_BG};
+                color: {Colors.TEXT_PRIMARY};
+                border: 1px solid {Colors.BORDER};
+                border-radius: 4px;
+                padding: 4px 16px;
+                font-family: {Colors.TEXT_SECONDARY};
+                font-size: 9pt;
+            }}
+            QPushButton:hover {{
+                background-color: {Colors.PANEL_BG};
+                border: 1px solid {Colors.STATUS_ORANGE};
+            }}
+            QPushButton:pressed {{
+                background-color: {Colors.STATUS_ORANGE};
+                color: {Colors.PRIMARY_BG};
+            }}
+        """
+        )
+
+        button_layout.addWidget(self.stall_btn)
+        button_layout.addWidget(self.rest_btn)
+
+        layout.addLayout(button_layout)
         layout.addLayout(gait_layout)
         layout.addStretch()
 
