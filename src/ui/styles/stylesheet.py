@@ -104,6 +104,12 @@ def get_main_stylesheet() -> str:
         color: {Colors.TEXT_DISABLED};
         border: 1px solid {Colors.BORDER};
     }}
+    QPushButton:checked {{
+        background-color: {Colors.ACCENT_YELLOW};
+        color: {Colors.PRIMARY_BG};
+        border: 1px solid {Colors.ACCENT_YELLOW};
+        font-weight: bold;
+    }}
     
     /* Labels */
     QLabel {{

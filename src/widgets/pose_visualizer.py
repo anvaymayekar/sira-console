@@ -72,7 +72,7 @@ class PoseVisualizerGL(QOpenGLWidget):
         # In default pose, feet should just barely touch the ground
         # Add a small offset so feet are slightly embedded (looks better)
         self.ground_offset = -3.0 - min_y + 0.2
-        print(f"Ground offset calculated: {self.ground_offset:.2f} (min_y={min_y:.2f})")
+        # print(f"Ground offset calculated: {self.ground_offset:.2f} (min_y={min_y:.2f})")
 
     def _calculate_leg_endpoints(self, leg_idx, hip_angle, thigh_angle, tibia_angle):
         """Calculate the 3D positions of leg joints given servo angles.
