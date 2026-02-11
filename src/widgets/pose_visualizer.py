@@ -46,26 +46,33 @@ class PoseVisualizerGL(QOpenGLWidget):
         self._calculate_ground_offset()
 
     def _calculate_ground_offset(self):
-        """Calculate the Y offset needed to place the hexapod on the ground plane."""
-        # Find the lowest foot position in the current pose
+        """Calculate the Y offset needed to place the hexapod on the ground plane.
+
+        This is calculated ONCE for the default standing pose and never changes.
+        The robot can then move its legs freely and will naturally lift/tilt.
+        """
+        # Use the DEFAULT servo angles for ground calculation
+        default_hip = 90
+        default_thigh = 120
+        default_tibia = 0
+
         min_y = float("inf")
 
         for leg_idx in range(6):
             _, foot_pos = self._calculate_leg_endpoints(
                 leg_idx,
-                self.servo_angles[leg_idx, 0],
-                self.servo_angles[leg_idx, 1],
-                self.servo_angles[leg_idx, 2],
+                default_hip,
+                default_thigh,
+                default_tibia,
             )
             if foot_pos[1] < min_y:
                 min_y = foot_pos[1]
 
         # Ground plane is at y = -3.0
-        # Offset needed to place the lowest foot exactly on the ground
-        # If min_y = -5, and ground is -3, we need to lift by 2 (offset = +2)
-        # offset = ground_y - min_y
-        self.ground_offset = -3.0 - min_y
-        # print(f"DEBUG: min_y={min_y:.2f}, ground_offset={self.ground_offset:.2f}")
+        # In default pose, feet should just barely touch the ground
+        # Add a small offset so feet are slightly embedded (looks better)
+        self.ground_offset = -3.0 - min_y + 0.2
+        print(f"Ground offset calculated: {self.ground_offset:.2f} (min_y={min_y:.2f})")
 
     def _calculate_leg_endpoints(self, leg_idx, hip_angle, thigh_angle, tibia_angle):
         """Calculate the 3D positions of leg joints given servo angles.
@@ -150,61 +157,14 @@ class PoseVisualizerGL(QOpenGLWidget):
         return (hip_pos, thigh_pos, foot_pos), foot_pos
 
     def _calculate_body_tilt(self):
-        """Calculate body tilt based on foot positions - physically realistic."""
-        # Get all foot positions in world space (before ground offset is applied)
-        foot_positions = []
-        foot_heights = []
+        """Calculate body tilt based on foot positions.
 
-        for leg_idx in range(6):
-            _, foot_pos = self._calculate_leg_endpoints(
-                leg_idx,
-                self.servo_angles[leg_idx, 0],
-                self.servo_angles[leg_idx, 1],
-                self.servo_angles[leg_idx, 2],
-            )
-            foot_positions.append(foot_pos)
-            foot_heights.append(foot_pos[1])
-
-        foot_positions = np.array(foot_positions)
-
-        # If all feet are at roughly the same height, no tilt needed
-        height_variance = np.var(foot_heights)
-        if height_variance < 0.1:  # All feet roughly level
-            return 0, 0, 0
-
-        # Calculate which feet would be on the ground
-        # The ground touches the lowest foot(s)
-        min_height = min(foot_heights)
-        ground_tolerance = 0.3  # Feet within this distance are "on ground"
-
-        on_ground = []
-        ground_feet_pos = []
-        for i, h in enumerate(foot_heights):
-            if abs(h - min_height) < ground_tolerance:
-                on_ground.append(i)
-                ground_feet_pos.append(foot_positions[i])
-
-        # Need at least 3 feet for stable support
-        if len(on_ground) < 3:
-            # Unstable - use all feet
-            ground_feet_pos = foot_positions
-
-        ground_feet_pos = np.array(ground_feet_pos)
-
-        # Calculate the center of the support polygon
-        support_center_x = np.mean(ground_feet_pos[:, 0])
-        support_center_z = np.mean(ground_feet_pos[:, 2])
-
-        # Body should tilt toward the support center
-        # Small tilt proportional to offset from center
-        tilt_z = -np.degrees(np.arctan2(support_center_x, 15))  # Roll (around Z)
-        tilt_x = np.degrees(np.arctan2(support_center_z, 15))  # Pitch (around X)
-
-        # Limit maximum tilt to reasonable values
-        tilt_x = np.clip(tilt_x, -20, 20)
-        tilt_z = np.clip(tilt_z, -20, 20)
-
-        return tilt_x, 0, tilt_z
+        DISABLED: For now, keep the body level and let the legs do all the work.
+        The robot will naturally appear tilted when some legs are shorter.
+        """
+        # No tilt - body stays perfectly level
+        # The visual tilt comes naturally from leg positions
+        return 0, 0, 0
 
     def initializeGL(self) -> None:
         """Initialize OpenGL."""
@@ -248,15 +208,11 @@ class PoseVisualizerGL(QOpenGLWidget):
 
         self._draw_ground_plane()
 
-        # Apply ground offset and physics-based tilt
+        # Apply ground offset only - no dynamic tilting
         glPushMatrix()
         glTranslatef(0.0, self.ground_offset, 0.0)
 
-        # Apply body tilt for non-alternate tripod stances
-        tilt_x, tilt_y, tilt_z = self._calculate_body_tilt()
-        glRotatef(tilt_x, 1.0, 0.0, 0.0)
-        glRotatef(tilt_z, 0.0, 0.0, 1.0)
-
+        # Body stays level - natural tilt comes from leg positions
         self._draw_hexapod()
         glPopMatrix()
 
@@ -585,7 +541,7 @@ class PoseVisualizerGL(QOpenGLWidget):
             angle = max(min_ang, min(max_ang, angle))
 
             self.servo_angles[leg, joint] = angle
-            self._calculate_ground_offset()  # Recalculate ground offset
+            # DON'T recalculate ground offset - let the robot move naturally
             self.update()
 
     def get_servo_angle(self, leg: int, joint: int) -> float:
