@@ -1,7 +1,7 @@
 """Clean and physically accurate 3D pose visualizer for SIRA Console hexapod."""
 
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QOpenGLWidget
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QPainter, QColor
 from OpenGL.GL import *
 from OpenGL.GLU import *
@@ -19,6 +19,13 @@ class PoseVisualizerGL(QOpenGLWidget):
         self.rotation_y = 45
         self.zoom = -35
         self.last_pos = None
+
+        # Dynamic camera movement
+        self.auto_rotate = True
+        self.auto_rotation_speed = 0.15  # degrees per frame (slow and smooth)
+        self.animation_timer = QTimer()
+        self.animation_timer.timeout.connect(self._update_camera)
+        self.animation_timer.start(16)  # ~60 FPS
 
         # Servo angles for 6 legs, 3 joints each (hip, thigh, tibia)
         # Default positions based on specifications
@@ -44,6 +51,14 @@ class PoseVisualizerGL(QOpenGLWidget):
 
         # Calculate ground offset
         self._calculate_ground_offset()
+
+    def _update_camera(self):
+        """Update camera rotation for smooth animation."""
+        if self.auto_rotate:
+            self.rotation_y += self.auto_rotation_speed
+            if self.rotation_y >= 360:
+                self.rotation_y -= 360
+            self.update()
 
     def _calculate_ground_offset(self):
         """Calculate the Y offset needed to place the hexapod on the ground plane.
@@ -553,6 +568,8 @@ class PoseVisualizerGL(QOpenGLWidget):
     def mousePressEvent(self, event) -> None:
         """Handle mouse press."""
         self.last_pos = event.pos()
+        # Disable auto-rotation when user interacts
+        self.auto_rotate = False
 
     def mouseMoveEvent(self, event) -> None:
         """Handle mouse move."""
@@ -567,6 +584,10 @@ class PoseVisualizerGL(QOpenGLWidget):
                 self.update()
 
             self.last_pos = event.pos()
+
+    def mouseReleaseEvent(self, event) -> None:
+        """Handle mouse release - re-enable auto-rotation."""
+        self.auto_rotate = True
 
     def wheelEvent(self, event) -> None:
         """Handle mouse wheel."""
