@@ -91,13 +91,13 @@ class SensorDisplay(QWidget):
 
         self.temp_label = QLabel("0.0°C")
         self.temp_label.setMinimumWidth(60)
-        self.humidity_label = QLabel("0.0%")
-        self.humidity_label.setMinimumWidth(60)
+        # self.humidity_label = QLabel("0.0%")
+        # self.humidity_label.setMinimumWidth(60)
 
         env_layout.addWidget(QLabel("Temperature:"), 0, 0)
         env_layout.addWidget(self.temp_label, 0, 1)
-        env_layout.addWidget(QLabel("Humidity:"), 1, 0)
-        env_layout.addWidget(self.humidity_label, 1, 1)
+        # env_layout.addWidget(QLabel("Humidity:"), 1, 0)
+        # env_layout.addWidget(self.humidity_label, 1, 1)
 
         env_group.setLayout(env_layout)
 
@@ -175,7 +175,7 @@ class SensorDisplay(QWidget):
         self.imu_z_label.setText(f"{data.imu_z:.1f}°")
 
         self.temp_label.setText(f"{data.temperature:.1f}°C")
-        self.humidity_label.setText(f"{data.humidity:.1f}%")
+        # self.humidity_label.setText(f"{data.humidity:.1f}%")
 
         self.altitude_label.setText(f"{data.altitude:.1f}cm")
         self.distance_label.setText(f"{data.front_distance:.1f}cm")
