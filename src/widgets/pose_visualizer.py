@@ -63,31 +63,30 @@ class PoseVisualizerGL(QOpenGLWidget):
     def _calculate_ground_offset(self):
         """Calculate the Y offset needed to place the hexapod on the ground plane.
 
-        This is calculated ONCE for the default standing pose and never changes.
-        The robot can then move its legs freely and will naturally lift/tilt.
+        This is calculated dynamically based on current servo positions.
+        The robot's feet will always stay on or above the ground plane.
         """
-        # Use the DEFAULT servo angles for ground calculation
-        default_hip = 90
-        default_thigh = 120
-        default_tibia = 0
-
         min_y = float("inf")
 
+        # Find the lowest foot position based on CURRENT servo angles
         for leg_idx in range(6):
+            hip_angle = self.servo_angles[leg_idx, 0]
+            thigh_angle = self.servo_angles[leg_idx, 1]
+            tibia_angle = self.servo_angles[leg_idx, 2]
+
             _, foot_pos = self._calculate_leg_endpoints(
                 leg_idx,
-                default_hip,
-                default_thigh,
-                default_tibia,
+                hip_angle,
+                thigh_angle,
+                tibia_angle,
             )
             if foot_pos[1] < min_y:
                 min_y = foot_pos[1]
 
         # Ground plane is at y = -3.0
-        # In default pose, feet should just barely touch the ground
-        # Add a small offset so feet are slightly embedded (looks better)
-        self.ground_offset = -3.0 - min_y + 0.2
-        # print(f"Ground offset calculated: {self.ground_offset:.2f} (min_y={min_y:.2f})")
+        # Adjust body so the lowest foot just touches the ground
+        self.ground_offset = -3.0 - min_y + 0.1  # Small offset so feet touch ground
+        # print(f"Ground offset updated: {self.ground_offset:.2f} (min_y={min_y:.2f})")
 
     def _calculate_leg_endpoints(self, leg_idx, hip_angle, thigh_angle, tibia_angle):
         """Calculate the 3D positions of leg joints given servo angles.
@@ -556,7 +555,8 @@ class PoseVisualizerGL(QOpenGLWidget):
             angle = max(min_ang, min(max_ang, angle))
 
             self.servo_angles[leg, joint] = angle
-            # DON'T recalculate ground offset - let the robot move naturally
+            # Recalculate ground offset so feet always stay on ground (physics!)
+            self._calculate_ground_offset()
             self.update()
 
     def get_servo_angle(self, leg: int, joint: int) -> float:
