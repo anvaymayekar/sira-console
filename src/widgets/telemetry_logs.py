@@ -9,7 +9,9 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QCheckBox,
 )
-from PyQt5.QtCore import Qt
+from typing import Optional
+from src.network import SocketClient
+from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtGui import QTextCursor, QColor
 from src.utils.constants import LogLevel, Colors
 from src.models.telemetry import TelemetryLog
@@ -18,17 +20,24 @@ from src.models.telemetry import TelemetryLog
 class TelemetryLogsWidget(QWidget):
     """Telemetry logs widget with search and controls."""
 
-    def __init__(self, parent=None):
+    def __init__(self, socket_client: Optional[SocketClient] = None, parent=None):
         """
         Initialize telemetry logs widget.
 
         Args:
+            socket_client: Socket client for receiving telemetry
             parent: Parent widget
         """
         super().__init__(parent)
+        self.socket_client = socket_client
         self.telemetry = TelemetryLog()
         self._auto_scroll = True
         self._setup_ui()
+
+        # Connect to socket client if provided
+        if self.socket_client:
+            self.socket_client.telemetry_received.connect(self._on_telemetry_received)
+            self.socket_client.connection_changed.connect(self._on_connection_changed)
 
     def _setup_ui(self) -> None:
         """Setup the user interface."""
@@ -187,3 +196,34 @@ class TelemetryLogsWidget(QWidget):
         self.telemetry.clear()
         self.log_display.clear()
         self.add_log(LogLevel.INFO, "Logs cleared")
+
+    @pyqtSlot(dict)
+    def _on_telemetry_received(self, data: dict):
+        """
+        Handle telemetry data from Pi.
+
+        Args:
+            data: Telemetry dictionary
+        """
+        # Log human detection
+        if data.get("human_detected"):
+            self.add_log(LogLevel.WARNING, "⚠ HUMAN DETECTED!")
+
+        # Optionally log other data periodically
+        # Uncomment if you want to see all telemetry:
+        # battery = data.get('battery_voltage', 0)
+        # temp = data.get('temperature', 0)
+        # self.add_log(LogLevel.INFO, f"Battery: {battery:.2f}V, Temp: {temp:.1f}°C")
+
+    @pyqtSlot(bool)
+    def _on_connection_changed(self, connected: bool):
+        """
+        Handle connection state change.
+
+        Args:
+            connected: Connection state
+        """
+        if connected:
+            self.add_log(LogLevel.INFO, "Connected to Hexapod")
+        else:
+            self.add_log(LogLevel.WARNING, "Disconnected from Hexapod")

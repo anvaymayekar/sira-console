@@ -11,24 +11,33 @@ from PyQt5.QtWidgets import (
     QGroupBox,
     QGridLayout,
     QTextEdit,
-    QFrame,
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSlot
 from src.utils.constants import Colors
+from src.network import SocketClient
+
+IP = "192.168.0.109"
 
 
 class ConnectionTab(QWidget):
     """Connection tab for managing robot connections."""
 
-    def __init__(self, parent=None):
+    def __init__(self, socket_client: SocketClient, parent=None):
         """
         Initialize connection tab.
 
         Args:
+            socket_client: Shared socket client instance
             parent: Parent widget
         """
         super().__init__(parent)
+        self.socket_client = socket_client
         self._connected = False
+
+        # Connect to socket client signals
+        self.socket_client.connection_changed.connect(self._on_connection_changed)
+        self.socket_client.error_occurred.connect(self._on_error)
+
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -45,52 +54,36 @@ class ConnectionTab(QWidget):
         # Protocol selection
         protocol_label = QLabel("Protocol:")
         self.protocol_combo = QComboBox()
-        self.protocol_combo.addItems(["Serial", "TCP", "UDP", "WebSocket"])
+        self.protocol_combo.addItems(
+            ["TCP Socket", "Serial (Not Implemented)", "UDP (Not Implemented)"]
+        )
         self.protocol_combo.currentTextChanged.connect(self._on_protocol_changed)
 
         settings_layout.addWidget(protocol_label, 0, 0)
         settings_layout.addWidget(self.protocol_combo, 0, 1)
 
-        # Serial settings (shown by default)
-        self.serial_widget = QWidget()
-        serial_layout = QGridLayout(self.serial_widget)
+        # Preset configurations
+        preset_label = QLabel("Preset:")
+        self.preset_combo = QComboBox()
+        self.preset_combo.addItems(["Custom", f"Pi Hotspot ({IP})", "Local Network"])
+        self.preset_combo.currentTextChanged.connect(self._on_preset_changed)
 
-        port_label = QLabel("Port:")
-        self.port_combo = QComboBox()
-        self.port_combo.addItems(
-            ["COM1", "COM2", "COM3", "/dev/ttyUSB0", "/dev/ttyUSB1"]
-        )
-        self.port_combo.setEditable(True)
+        settings_layout.addWidget(preset_label, 1, 0)
+        settings_layout.addWidget(self.preset_combo, 1, 1)
 
-        baud_label = QLabel("Baud Rate:")
-        self.baud_combo = QComboBox()
-        self.baud_combo.addItems(["9600", "19200", "38400", "57600", "115200"])
-        self.baud_combo.setCurrentText("115200")
-
-        serial_layout.addWidget(port_label, 0, 0)
-        serial_layout.addWidget(self.port_combo, 0, 1)
-        serial_layout.addWidget(baud_label, 1, 0)
-        serial_layout.addWidget(self.baud_combo, 1, 1)
-
-        # TCP/UDP settings (hidden by default)
-        self.network_widget = QWidget()
-        network_layout = QGridLayout(self.network_widget)
-
-        host_label = QLabel("Host:")
-        self.host_input = QLineEdit("192.168.1.100")
+        # TCP settings
+        host_label = QLabel("Host (IP):")
+        self.host_input = QLineEdit(IP)
+        self.host_input.setPlaceholderText(f"e.g., {IP}")
 
         port_label = QLabel("Port:")
         self.port_input = QLineEdit("8080")
+        self.port_input.setPlaceholderText("e.g., 8080")
 
-        network_layout.addWidget(host_label, 0, 0)
-        network_layout.addWidget(self.host_input, 0, 1)
-        network_layout.addWidget(port_label, 1, 0)
-        network_layout.addWidget(self.port_input, 1, 1)
-
-        self.network_widget.hide()
-
-        settings_layout.addWidget(self.serial_widget, 1, 0, 1, 2)
-        settings_layout.addWidget(self.network_widget, 1, 0, 1, 2)
+        settings_layout.addWidget(host_label, 2, 0)
+        settings_layout.addWidget(self.host_input, 2, 1)
+        settings_layout.addWidget(port_label, 3, 0)
+        settings_layout.addWidget(self.port_input, 3, 1)
 
         settings_group.setLayout(settings_layout)
 
@@ -99,12 +92,9 @@ class ConnectionTab(QWidget):
 
         self.connect_btn = QPushButton("Connect")
         self.connect_btn.clicked.connect(self._toggle_connection)
-
-        self.refresh_btn = QPushButton("Refresh Ports")
-        self.refresh_btn.clicked.connect(self._refresh_ports)
+        self.connect_btn.setMinimumHeight(40)
 
         button_layout.addWidget(self.connect_btn)
-        button_layout.addWidget(self.refresh_btn)
         button_layout.addStretch()
 
         # Connection status group
@@ -113,19 +103,23 @@ class ConnectionTab(QWidget):
 
         self.status_text = QTextEdit()
         self.status_text.setReadOnly(True)
-        self.status_text.setMaximumHeight(150)
+        self.status_text.setMaximumHeight(200)
         self.status_text.setStyleSheet(
             f"""
             QTextEdit {{
                 background-color: {Colors.PRIMARY_BG};
                 color: {Colors.TEXT_PRIMARY};
                 border: none;
-                font-family: Consolas, Monaco, Courier New, monospace;
+                font-family: Consolas, Monaco, 'Courier New', monospace;
                 font-size: 9pt;
             }}
         """
         )
         self.status_text.append("Ready to connect...")
+        self.status_text.append("\nQuick Setup:")
+        self.status_text.append("1. Switch On the Hexapod")
+        self.status_text.append("2. Select 'Pi Hotspot' preset or enter Pi's IP")
+        self.status_text.append("3. Click 'Connect'")
 
         status_layout.addWidget(self.status_text)
         status_group.setLayout(status_layout)
@@ -135,10 +129,11 @@ class ConnectionTab(QWidget):
         info_layout = QVBoxLayout()
 
         self.info_label = QLabel(
-            "<b>Serial Protocol:</b><br>"
-            "Direct serial connection via USB or UART.<br>"
-            "Suitable for local connections with reliable data transfer.<br><br>"
-            "<b>Configuration:</b> Select the appropriate COM port and baud rate."
+            "<b>TCP Socket Protocol:</b><br>"
+            "Direct socket connection for real-time camera streaming and telemetry.<br>"
+            "Low latency, high bandwidth, reliable delivery.<br><br>"
+            f"<b>Pi Hotspot Mode:</b> Pi at {IP} (always)<br>"
+            "<b>Local Network:</b> Find Pi's IP with 'hostname -I' command on Pi"
         )
         self.info_label.setWordWrap(True)
         self.info_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY};")
@@ -162,65 +157,107 @@ class ConnectionTab(QWidget):
         Args:
             protocol: Selected protocol
         """
-        if protocol == "Serial":
-            self.serial_widget.show()
-            self.network_widget.hide()
-            self.info_label.setText(
-                "<b>Serial Protocol:</b><br>"
-                "Direct serial connection via USB or UART.<br>"
-                "Suitable for local connections with reliable data transfer.<br><br>"
-                "<b>Configuration:</b> Select the appropriate COM port and baud rate."
-            )
+        if protocol == "TCP Socket":
+            self.host_input.setEnabled(True)
+            self.port_input.setEnabled(True)
+            self.preset_combo.setEnabled(True)
         else:
-            self.serial_widget.hide()
-            self.network_widget.show()
-            if protocol == "TCP":
-                self.info_label.setText(
-                    "<b>TCP Protocol:</b><br>"
-                    "Reliable network connection with guaranteed delivery.<br>"
-                    "Suitable for WiFi or Ethernet connections.<br><br>"
-                    "<b>Configuration:</b> Enter the robot's IP address and port."
-                )
-            elif protocol == "UDP":
-                self.info_label.setText(
-                    "<b>UDP Protocol:</b><br>"
-                    "Fast network connection with minimal overhead.<br>"
-                    "Suitable for real-time control with occasional packet loss tolerance.<br><br>"
-                    "<b>Configuration:</b> Enter the robot's IP address and port."
-                )
-            else:  # WebSocket
-                self.info_label.setText(
-                    "<b>WebSocket Protocol:</b><br>"
-                    "Bidirectional network connection over HTTP/HTTPS.<br>"
-                    "Suitable for cloud-based or web-integrated deployments.<br><br>"
-                    "<b>Configuration:</b> Enter the WebSocket server address and port."
-                )
+            self.status_text.append(f"\n{protocol} not yet implemented")
+
+    def _on_preset_changed(self, preset: str) -> None:
+        """
+        Handle preset change.
+
+        Args:
+            preset: Selected preset
+        """
+        if preset == f"Pi Hotspot {IP}":
+            self.host_input.setText(IP)
+            self.port_input.setText("8080")
+            self.status_text.append("\nPreset: Pi Hotspot mode selected")
+        elif preset == "Local Network":
+            self.host_input.setText("192.168.1.100")
+            self.port_input.setText("8080")
+            self.status_text.append("\nPreset: Local network - update IP if needed")
+        # Custom = no change
 
     def _toggle_connection(self) -> None:
         """Toggle connection state."""
         if not self._connected:
-            # Connect
+            # Attempt connection
             protocol = self.protocol_combo.currentText()
-            self.status_text.append(f"\nAttempting to connect via {protocol}...")
-            self.status_text.append("Connection successful!")
+
+            if protocol != "TCP Socket":
+                self.status_text.append(f"\n{protocol} not implemented yet")
+                return
+
+            # Get connection parameters
+            host = self.host_input.text().strip()
+            try:
+                port = int(self.port_input.text().strip())
+            except ValueError:
+                self.status_text.append("\nError: Invalid port number")
+                return
+
+            if not host:
+                self.status_text.append("\nError: Please enter host IP")
+                return
+
+            self.status_text.append(f"\nConnecting to {host}:{port}...")
+            self.connect_btn.setEnabled(False)
+
+            # Attempt connection
+            success = self.socket_client.connect(host, port)
+
+            self.connect_btn.setEnabled(True)
+
+            if not success:
+                self.status_text.append("Connection failed - see error above")
+        else:
+            # Disconnect
+            self.socket_client.disconnect()
+
+    @pyqtSlot(bool)
+    def _on_connection_changed(self, connected: bool):
+        """
+        Handle connection state change.
+
+        Args:
+            connected: New connection state
+        """
+        self._connected = connected
+
+        if connected:
             self.connect_btn.setText("Disconnect")
             self.connect_btn.setStyleSheet(
                 f"""
                 QPushButton {{
                     background-color: {Colors.STATUS_RED};
+                    color: {Colors.TEXT_PRIMARY};
+                    font-weight: bold;
                 }}
             """
             )
-            self._connected = True
+            self.status_text.append("Connected successfully!")
+            self.host_input.setEnabled(False)
+            self.port_input.setEnabled(False)
+            self.preset_combo.setEnabled(False)
+            self.protocol_combo.setEnabled(False)
         else:
-            # Disconnect
-            self.status_text.append("\nDisconnecting...")
-            self.status_text.append("Disconnected.")
             self.connect_btn.setText("Connect")
             self.connect_btn.setStyleSheet("")
-            self._connected = False
+            self.status_text.append("Disconnected")
+            self.host_input.setEnabled(True)
+            self.port_input.setEnabled(True)
+            self.preset_combo.setEnabled(True)
+            self.protocol_combo.setEnabled(True)
 
-    def _refresh_ports(self) -> None:
-        """Refresh available ports."""
-        self.status_text.append("\nRefreshing available ports...")
-        self.status_text.append("Found 3 available ports.")
+    @pyqtSlot(str)
+    def _on_error(self, error_msg: str):
+        """
+        Handle connection error.
+
+        Args:
+            error_msg: Error message
+        """
+        self.status_text.append(f"\nError: {error_msg}")

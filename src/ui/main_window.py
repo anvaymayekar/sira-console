@@ -22,6 +22,7 @@ from src.ui.components import SignalIndicator, CustomStatusBar
 from src.ui.styles import get_main_stylesheet
 from src.core.config_loader import ConfigLoader
 from src.utils.constants import ConnectionStatus, MovementStatus, TabIndex, Colors
+from src.network import SocketClient  # NEW IMPORT
 
 
 class MainWindow(QMainWindow):
@@ -36,6 +37,10 @@ class MainWindow(QMainWindow):
         """
         super().__init__()
         self.config = config
+
+        # Create socket client (SINGLE INSTANCE for entire app)
+        self.socket_client = SocketClient()
+
         self._setup_window()
         self._setup_ui()
         self._setup_menu()
@@ -67,11 +72,11 @@ class MainWindow(QMainWindow):
         self.tab_widget = QTabWidget()
         self.tab_widget.setTabPosition(QTabWidget.North)
 
-        # Create tabs
-        self.dashboard_tab = DashboardTab()
+        # Create tabs - PASS socket_client to tabs that need it
+        self.dashboard_tab = DashboardTab(socket_client=self.socket_client)
         self.control_tab = ControlTab(self.config)
-        self.analysis_tab = AnalysisTab()
-        self.connection_tab = ConnectionTab()
+        self.analysis_tab = AnalysisTab(socket_client=self.socket_client)
+        self.connection_tab = ConnectionTab(socket_client=self.socket_client)
         self.diagnostics_tab = DiagnosticsTab()
 
         # Add tabs
@@ -89,6 +94,9 @@ class MainWindow(QMainWindow):
 
         # Create signal indicator (top right)
         self.signal_indicator = SignalIndicator()
+
+        # Connect socket client to signal indicator
+        self.socket_client.connection_changed.connect(self._on_connection_changed)
 
     def _setup_menu(self) -> None:
         """Setup menu bar."""
@@ -170,6 +178,18 @@ class MainWindow(QMainWindow):
         # This would be connected to actual robot state in production
         pass
 
+    def _on_connection_changed(self, connected: bool) -> None:
+        """
+        Handle connection state change.
+
+        Args:
+            connected: Connection state
+        """
+        if connected:
+            self.set_connection_status(ConnectionStatus.CONNECTED)
+        else:
+            self.set_connection_status(ConnectionStatus.DISCONNECTED)
+
     def _confirm_exit(self) -> bool:
         """Show exit confirmation dialog."""
         reply = QMessageBox.question(
@@ -207,6 +227,10 @@ class MainWindow(QMainWindow):
         Args:
             event: Close event
         """
+        # Disconnect socket client before closing
+        if self.socket_client.is_connected():
+            self.socket_client.disconnect()
+
         # Override to prevent direct closing without confirmation
         if self._confirm_exit():
             event.accept()

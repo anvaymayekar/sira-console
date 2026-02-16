@@ -8,6 +8,8 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QButtonGroup,
 )
+from typing import Optional
+from src.network import SocketClient
 from PyQt5.QtCore import Qt
 from src.widgets import CameraView, SensorDisplay, RemoteControl, TelemetryLogsWidget
 
@@ -15,14 +17,16 @@ from src.widgets import CameraView, SensorDisplay, RemoteControl, TelemetryLogsW
 class DashboardTab(QWidget):
     """Dashboard tab containing camera, sensors, and telemetry."""
 
-    def __init__(self, parent=None):
+    def __init__(self, socket_client: Optional[SocketClient] = None, parent=None):
         """
         Initialize dashboard tab.
 
         Args:
+            socket_client: Socket client for communication
             parent: Parent widget
         """
         super().__init__(parent)
+        self.socket_client = socket_client
         self._current_widget = 0  # 0: sensors, 1: remote
         self._setup_ui()
 
@@ -36,7 +40,7 @@ class DashboardTab(QWidget):
         main_splitter = QSplitter(Qt.Horizontal)
 
         # Left side: Camera view (2 parts width)
-        self.camera_view = CameraView()
+        self.camera_view = CameraView(socket_client=self.socket_client)
 
         # Right side: Vertical splitter (1 part width)
         right_splitter = QSplitter(Qt.Vertical)
@@ -78,7 +82,7 @@ class DashboardTab(QWidget):
         toggle_layout.addWidget(self.remote_control, 1)
 
         # Bottom right: Telemetry logs (1 part height)
-        self.telemetry_logs = TelemetryLogsWidget()
+        self.telemetry_logs = TelemetryLogsWidget(socket_client=self.socket_client)
 
         # Add to right splitter
         right_splitter.addWidget(toggle_widget)

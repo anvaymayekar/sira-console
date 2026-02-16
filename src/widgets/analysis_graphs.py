@@ -1,7 +1,9 @@
 """Analysis graphs widget for SIRA Console."""
 
+from typing import Optional
+from src.network import SocketClient
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QFrame
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, pyqtSlot
 import pyqtgraph as pg
 from src.utils.constants import Colors
 import numpy as np
@@ -12,14 +14,16 @@ from datetime import datetime
 class AnalysisGraphs(QWidget):
     """Analysis graphs widget with multiple visualization options."""
 
-    def __init__(self, parent=None):
+    def __init__(self, socket_client: Optional[SocketClient] = None, parent=None):
         """
         Initialize analysis graphs.
 
         Args:
+            socket_client: Socket client for receiving data
             parent: Parent widget
         """
         super().__init__(parent)
+        self.socket_client = socket_client
         self._data_history = {
             "battery": deque(maxlen=300),
             "temperature": deque(maxlen=300),
@@ -28,8 +32,15 @@ class AnalysisGraphs(QWidget):
             "imu_z": deque(maxlen=300),
             "timestamps": deque(maxlen=300),
         }
+        self._detection_log = []
         self._setup_ui()
-        self._start_demo_data()
+
+        # Connect to socket client if provided
+        if self.socket_client:
+            self.socket_client.telemetry_received.connect(self._on_telemetry_received)
+        else:
+            # Fallback to demo data if no socket client
+            self._start_demo_data()
 
     def _setup_ui(self) -> None:
         """Setup the user interface."""
@@ -204,6 +215,51 @@ class AnalysisGraphs(QWidget):
         self._data_history["imu_y"].append(imu_y)
         self._data_history["imu_z"].append(imu_z)
         self._data_history["timestamps"].append(datetime.now())
+
+        # Update current graph
+        current_graph = self.graph_combo.currentText()
+        if current_graph == "Battery Voltage":
+            self._update_plot("battery", Colors.STATUS_GREEN)
+        elif current_graph == "Temperature":
+            self._update_plot("temperature", Colors.STATUS_RED)
+        elif current_graph == "IMU Orientation":
+            self._update_plot_multi(["imu_x", "imu_y", "imu_z"])
+
+    @pyqtSlot(dict)
+    def _on_telemetry_received(self, data: dict):
+        """
+        Handle telemetry data from Pi.
+
+        Args:
+            data: Telemetry dictionary
+        """
+        # Extract data
+        battery = data.get("battery_voltage", 12.0)
+        temp = data.get("temperature", 25.0)
+        imu = data.get("imu", {})
+        imu_x = imu.get("x", 0.0)
+        imu_y = imu.get("y", 0.0)
+        imu_z = imu.get("z", 0.0)
+        human_detected = data.get("human_detected", False)
+
+        # Add to history
+        self._data_history["battery"].append(battery)
+        self._data_history["temperature"].append(temp)
+        self._data_history["imu_x"].append(imu_x)
+        self._data_history["imu_y"].append(imu_y)
+        self._data_history["imu_z"].append(imu_z)
+        self._data_history["timestamps"].append(datetime.now())
+
+        # Log detections
+        if human_detected:
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            self._detection_log.append(f"[{timestamp}] Human detected")
+
+            # Update presence log if visible
+            if self.graph_combo.currentText() == "Human Presence Log":
+                log_text = "Human Presence Log\n\n"
+                log_text += "\n".join(self._detection_log[-20:])  # Last 20 detections
+                self.presence_log.setText(log_text)
 
         # Update current graph
         current_graph = self.graph_combo.currentText()

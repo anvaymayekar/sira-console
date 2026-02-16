@@ -10,7 +10,10 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QFrame,
 )
-from PyQt5.QtCore import Qt, QTimer
+from src.network import SocketClient
+import cv2
+from PyQt5.QtCore import Qt, QTimer, pyqtSlot
+from typing import Optional
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen
 from src.utils.constants import Colors
 import numpy as np
@@ -19,18 +22,25 @@ import numpy as np
 class CameraView(QWidget):
     """Camera view widget with controls."""
 
-    def __init__(self, parent=None):
+    def __init__(self, socket_client: Optional[SocketClient] = None, parent=None):
         """
         Initialize camera view.
 
         Args:
+            socket_client: Socket client for receiving frames
             parent: Parent widget
         """
         super().__init__(parent)
+        self.socket_client = socket_client
         self._recording = False
         self._show_grid = False
         self._current_fps = 30
         self._setup_ui()
+
+        # Connect to socket client if provided
+        if self.socket_client:
+            self.socket_client.frame_received.connect(self._update_frame)
+            self.socket_client.connection_changed.connect(self._on_connection_changed)
 
     def _setup_ui(self) -> None:
         """Setup the user interface."""
@@ -109,10 +119,10 @@ class CameraView(QWidget):
 
         self.setLayout(layout)
 
-        # Setup demo timer
-        self._demo_timer = QTimer()
-        self._demo_timer.timeout.connect(self._update_demo_frame)
-        self._demo_timer.start(33)  # ~30 FPS
+        # # Setup demo timer
+        # self._demo_timer = QTimer()
+        # self._demo_timer.timeout.connect(self._update_demo_frame)
+        # self._demo_timer.start(33)  # ~30 FPS
 
     def _toggle_recording(self, checked: bool) -> None:
         """
@@ -167,20 +177,19 @@ class CameraView(QWidget):
         """
         self._current_fps = int(fps)
 
-    def _update_demo_frame(self) -> None:
-        """Update demo frame with placeholder content."""
-        # Create a demo frame
-        width, height = 640, 480
-        image = np.zeros((height, width, 3), dtype=np.uint8)
+    @pyqtSlot(np.ndarray)
+    def _update_frame(self, frame: np.ndarray):
+        """
+        Update camera view with received frame.
 
-        # Add some pattern
-        image[::20, :] = [30, 30, 30]
-        image[:, ::20] = [30, 30, 30]
-
-        # Convert to QPixmap
-        h, w, ch = image.shape
+        Args:
+            frame: BGR frame from Pi
+        """
+        # Convert BGR to RGB
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w, ch = frame_rgb.shape
         bytes_per_line = ch * w
-        q_image = QImage(image.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        q_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
         pixmap = QPixmap.fromImage(q_image)
 
         # Draw grid if enabled
@@ -204,3 +213,14 @@ class CameraView(QWidget):
                 self.camera_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
             )
         )
+
+    @pyqtSlot(bool)
+    def _on_connection_changed(self, connected: bool):
+        """
+        Handle connection state change.
+
+        Args:
+            connected: Connection state
+        """
+        if not connected:
+            self.camera_label.setText("No Camera Feed - Disconnected")
