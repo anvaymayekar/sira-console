@@ -383,10 +383,6 @@ class CameraView(QWidget):
             bg_w = text_width + bg_padding * 2
             bg_h = dot_size + bg_padding * 2
 
-            painter.setBrush(QColor(0, 0, 0, 180))
-            painter.setPen(Qt.NoPen)
-            painter.drawRoundedRect(bg_x, bg_y, bg_w, bg_h, 5, 5)
-
             # Draw text (white)
             painter.setPen(QColor(255, 255, 255))
             painter.drawText(text_x, text_y, duration)
@@ -410,19 +406,6 @@ class CameraView(QWidget):
         ts_margin = 10
         ts_x = w - timestamp_width - ts_margin - 10
         ts_y = h - ts_margin - 5
-
-        # Draw background
-        bg_padding = 6
-        painter.setBrush(QColor(0, 0, 0, 180))
-        painter.setPen(Qt.NoPen)
-        painter.drawRoundedRect(
-            ts_x - bg_padding,
-            ts_y - timestamp_height - bg_padding + fm.descent(),
-            timestamp_width + bg_padding * 2,
-            timestamp_height + bg_padding * 2,
-            5,
-            5,
-        )
 
         # Draw timestamp text
         painter.setPen(QColor(255, 255, 255))
