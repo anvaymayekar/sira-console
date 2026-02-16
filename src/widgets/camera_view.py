@@ -12,12 +12,13 @@ from PyQt5.QtWidgets import (
     QFrame,
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSlot
-from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen
+from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QFont, QColor
 from src.utils.constants import Colors
 import numpy as np
 import cv2
 from src.network import SocketClient
-from src.core.media_manager import MediaManager  # NEW IMPORT
+from src.core.media_manager import MediaManager
+from datetime import datetime
 
 
 class CameraView(QWidget):
@@ -43,8 +44,21 @@ class CameraView(QWidget):
         self._recording = False
         self._show_grid = False
         self._current_fps = 30
-        self._current_frame: Optional[np.ndarray] = None  # Store current frame
+        self._current_frame: Optional[np.ndarray] = None
+        self._recording_start_time: Optional[datetime] = None
+        self._recording_blink_state = False
+        self._blink_opacity = 255  # For fade effect
+        self._blink_direction = -1  # -1 for fading out, 1 for fading in
         self._setup_ui()
+
+        # Timer for updating recording duration display
+        self._recording_timer = QTimer()
+        self._recording_timer.timeout.connect(self._update_recording_display)
+
+        # Timer for updating timestamp display (even when not recording)
+        self._timestamp_timer = QTimer()
+        self._timestamp_timer.timeout.connect(self._update_timestamp_display)
+        self._timestamp_timer.start(50)  # Update every 50ms for milliseconds
 
         # Connect to socket client
         if self.socket_client:
@@ -146,6 +160,11 @@ class CameraView(QWidget):
                 success = self.media_manager.start_recording(self._current_frame)
                 if success:
                     self._recording = True
+                    self._recording_start_time = datetime.now()
+                    self._blink_opacity = 255
+                    self._blink_direction = -1
+                    self._recording_timer.start(50)  # Update every 50ms for smooth fade
+
                     self.record_btn.setText("Stop")
                     self.record_btn.setStyleSheet(
                         f"""
@@ -155,6 +174,9 @@ class CameraView(QWidget):
                         }}
                     """
                     )
+                    # Redraw frame to show recording indicator
+                    if self._current_frame is not None:
+                        self._display_frame(self._current_frame)
                 else:
                     self.record_btn.setChecked(False)
             else:
@@ -164,8 +186,36 @@ class CameraView(QWidget):
             # Stop recording
             self.media_manager.stop_recording()
             self._recording = False
+            self._recording_start_time = None
+            self._recording_timer.stop()
+
             self.record_btn.setText("Record")
             self.record_btn.setStyleSheet("")
+
+            # Redraw frame to remove recording indicator
+            if self._current_frame is not None:
+                self._display_frame(self._current_frame)
+
+    def _update_recording_display(self) -> None:
+        """Update the display to show current recording duration."""
+        if self._recording and self._current_frame is not None:
+            # Update fade effect
+            self._blink_opacity += self._blink_direction * 15
+
+            # Reverse direction at limits
+            if self._blink_opacity <= 80:
+                self._blink_opacity = 80
+                self._blink_direction = 1
+            elif self._blink_opacity >= 255:
+                self._blink_opacity = 255
+                self._blink_direction = -1
+
+            self._display_frame(self._current_frame)
+
+    def _update_timestamp_display(self) -> None:
+        """Update timestamp display (even when not recording)."""
+        if self._current_frame is not None:
+            self._display_frame(self._current_frame)
 
     def _take_snapshot(self) -> None:
         """Take a snapshot of current frame."""
@@ -197,8 +247,6 @@ class CameraView(QWidget):
         Args:
             resolution: Resolution string
         """
-        # This would send command to Pi to change resolution
-        # For now, just placeholder
         pass
 
     def _change_fps(self, fps: str) -> None:
@@ -209,8 +257,6 @@ class CameraView(QWidget):
             fps: FPS string
         """
         self._current_fps = int(fps)
-        # This would send command to Pi to change FPS
-        # For now, just placeholder
 
     @pyqtSlot(np.ndarray)
     def _update_frame(self, frame: np.ndarray):
@@ -227,12 +273,38 @@ class CameraView(QWidget):
         if self._recording and self.media_manager:
             self.media_manager.record_frame(frame)
 
-        # Display frame
-        self._display_frame(frame)
+        # Display frame (will be called by timer for timestamp updates)
+
+    def _get_recording_duration(self) -> str:
+        """
+        Get formatted recording duration.
+
+        Returns:
+            Duration string in format HH:MM:SS
+        """
+        if not self._recording_start_time:
+            return "00:00:00"
+
+        elapsed = datetime.now() - self._recording_start_time
+        total_seconds = int(elapsed.total_seconds())
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        seconds = total_seconds % 60
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+    def _get_current_timestamp(self) -> str:
+        """
+        Get current timestamp with milliseconds.
+
+        Returns:
+            Timestamp string in format "DD Mon YYYY HH:MM:SS:MS"
+        """
+        now = datetime.now()
+        return now.strftime("%d %b %Y %H:%M:%S") + f":{now.microsecond // 10000:02d}"
 
     def _display_frame(self, frame: np.ndarray):
         """
-        Display frame on screen.
+        Display frame on screen with overlays.
 
         Args:
             frame: BGR frame to display
@@ -244,9 +316,12 @@ class CameraView(QWidget):
         q_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
         pixmap = QPixmap.fromImage(q_image)
 
+        # Create painter for overlays
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+
         # Draw grid if enabled
         if self._show_grid:
-            painter = QPainter(pixmap)
             pen = QPen(Qt.white)
             pen.setWidth(1)
             painter.setPen(pen)
@@ -258,7 +333,102 @@ class CameraView(QWidget):
             for i in range(1, 3):
                 y = h * i // 3
                 painter.drawLine(0, y, w, y)
-            painter.end()
+
+        # Draw recording indicator if recording
+        if self._recording:
+            margin = 15
+            dot_size = 18
+
+            # Recording dot with fade effect
+            painter.setBrush(QColor(255, 0, 0, self._blink_opacity))
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(margin, margin, dot_size, dot_size)
+
+            # Recording timer (aligned with dot)
+            duration = self._get_recording_duration()
+            font = QFont("Consolas", 14, QFont.Bold)
+            painter.setFont(font)
+
+            # Measure text for proper alignment
+            fm = painter.fontMetrics()
+            text_height = fm.height()
+            text_width = fm.horizontalAdvance(duration)
+
+            # Position text vertically centered with dot
+            text_x = margin + dot_size + 10
+            text_y = margin + (dot_size - text_height) // 2 + fm.ascent()
+
+            # Draw text background (semi-transparent black)
+            bg_padding = 5
+            bg_rect = fm.boundingRect(duration)
+            bg_rect.moveTopLeft(
+                painter.transform().map(
+                    painter.worldTransform()
+                    .inverted()[0]
+                    .map(
+                        painter.deviceTransform().map(
+                            painter.transform().map(
+                                painter.worldTransform().map(
+                                    painter.deviceTransform()
+                                    .inverted()[0]
+                                    .map(QPixmap().rect().topLeft())
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+            bg_x = text_x - bg_padding
+            bg_y = margin - bg_padding
+            bg_w = text_width + bg_padding * 2
+            bg_h = dot_size + bg_padding * 2
+
+            painter.setBrush(QColor(0, 0, 0, 180))
+            painter.setPen(Qt.NoPen)
+            painter.drawRoundedRect(bg_x, bg_y, bg_w, bg_h, 5, 5)
+
+            # Draw text (white)
+            painter.setPen(QColor(255, 255, 255))
+            painter.drawText(text_x, text_y, duration)
+
+            # "REC" text below
+            rec_font = QFont("Consolas", 9, QFont.Bold)
+            painter.setFont(rec_font)
+            rec_y = margin + dot_size + 15
+            painter.drawText(margin + dot_size + 10, rec_y, "REC")
+
+        # Draw timestamp (bottom-right corner) - ALWAYS visible
+        timestamp = self._get_current_timestamp()
+        timestamp_font = QFont("Consolas", 11, QFont.Normal)
+        painter.setFont(timestamp_font)
+
+        fm = painter.fontMetrics()
+        timestamp_width = fm.horizontalAdvance(timestamp)
+        timestamp_height = fm.height()
+
+        # Position in bottom-right
+        ts_margin = 10
+        ts_x = w - timestamp_width - ts_margin - 10
+        ts_y = h - ts_margin - 5
+
+        # Draw background
+        bg_padding = 6
+        painter.setBrush(QColor(0, 0, 0, 180))
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(
+            ts_x - bg_padding,
+            ts_y - timestamp_height - bg_padding + fm.descent(),
+            timestamp_width + bg_padding * 2,
+            timestamp_height + bg_padding * 2,
+            5,
+            5,
+        )
+
+        # Draw timestamp text
+        painter.setPen(QColor(255, 255, 255))
+        painter.drawText(ts_x, ts_y, timestamp)
+
+        painter.end()
 
         self.camera_label.setPixmap(
             pixmap.scaled(
@@ -282,6 +452,8 @@ class CameraView(QWidget):
             if self._recording and self.media_manager:
                 self.media_manager.stop_recording()
                 self._recording = False
+                self._recording_start_time = None
+                self._recording_timer.stop()
                 self.record_btn.setChecked(False)
                 self.record_btn.setText("Record")
                 self.record_btn.setStyleSheet("")

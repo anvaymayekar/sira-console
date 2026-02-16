@@ -1,5 +1,6 @@
 """Main window for SIRA Console."""
 
+import os
 from PyQt5.QtWidgets import (
     QMainWindow,
     QTabWidget,
