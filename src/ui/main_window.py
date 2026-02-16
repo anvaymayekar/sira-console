@@ -21,8 +21,9 @@ from src.ui.tabs import (
 from src.ui.components import SignalIndicator, CustomStatusBar
 from src.ui.styles import get_main_stylesheet
 from src.core.config_loader import ConfigLoader
+from src.core.media_manager import MediaManager  # NEW IMPORT
 from src.utils.constants import ConnectionStatus, MovementStatus, TabIndex, Colors
-from src.network import SocketClient  # NEW IMPORT
+from src.network import SocketClient
 
 
 class MainWindow(QMainWindow):
@@ -40,6 +41,9 @@ class MainWindow(QMainWindow):
 
         # Create socket client (SINGLE INSTANCE for entire app)
         self.socket_client = SocketClient()
+
+        # Create media manager (SINGLE INSTANCE for entire app)
+        self.media_manager = MediaManager(config)
 
         self._setup_window()
         self._setup_ui()
@@ -72,8 +76,10 @@ class MainWindow(QMainWindow):
         self.tab_widget = QTabWidget()
         self.tab_widget.setTabPosition(QTabWidget.North)
 
-        # Create tabs - PASS socket_client to tabs that need it
-        self.dashboard_tab = DashboardTab(socket_client=self.socket_client)
+        # Create tabs - PASS socket_client AND media_manager to tabs that need them
+        self.dashboard_tab = DashboardTab(
+            socket_client=self.socket_client, media_manager=self.media_manager
+        )
         self.control_tab = ControlTab(self.config)
         self.analysis_tab = AnalysisTab(socket_client=self.socket_client)
         self.connection_tab = ConnectionTab(socket_client=self.socket_client)
@@ -98,6 +104,11 @@ class MainWindow(QMainWindow):
         # Connect socket client to signal indicator
         self.socket_client.connection_changed.connect(self._on_connection_changed)
 
+        # Connect media manager signals to status bar
+        self.media_manager.snapshot_saved.connect(self._on_snapshot_saved)
+        self.media_manager.recording_started.connect(self._on_recording_started)
+        self.media_manager.recording_stopped.connect(self._on_recording_stopped)
+
     def _setup_menu(self) -> None:
         """Setup menu bar."""
         menubar = self.menuBar()
@@ -107,16 +118,6 @@ class MainWindow(QMainWindow):
         robot_label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
 
         menubar.setCornerWidget(robot_label, Qt.TopLeftCorner)
-        # # Options menu
-        # options_menu = menubar.addMenu("Options")
-
-        # # Exit action
-        # exit_action = QAction("Exit", self)
-        # exit_action.setShortcut(QKeySequence("Ctrl+Q"))
-        # # exit_action.triggered.connect(self._confirm_exit)
-        # exit_action.triggered.connect(self.close)
-
-        # options_menu.addAction(exit_action)
 
         # Add signal indicator to menu bar (right side)
         menubar.setCornerWidget(self.signal_indicator, Qt.TopRightCorner)
@@ -141,7 +142,7 @@ class MainWindow(QMainWindow):
         record_action = QAction(self)
         record_action.setShortcut(QKeySequence("Ctrl+R"))
         record_action.triggered.connect(self._toggle_recording)
-        self.addAction(record_action)
+        self.addAction(test_action)
 
     def _setup_timers(self) -> None:
         """Setup periodic timers."""
@@ -190,6 +191,23 @@ class MainWindow(QMainWindow):
         else:
             self.set_connection_status(ConnectionStatus.DISCONNECTED)
 
+    def _on_snapshot_saved(self, filepath: str) -> None:
+        """Handle snapshot saved event."""
+        filename = os.path.basename(filepath)
+        self.status_bar.showMessage(f"Snapshot saved: {filename}", 3000)
+
+    def _on_recording_started(self, filepath: str) -> None:
+        """Handle recording started event."""
+        filename = os.path.basename(filepath)
+        self.status_bar.showMessage(f"Recording started: {filename}", 3000)
+
+    def _on_recording_stopped(self, filepath: str, frame_count: int) -> None:
+        """Handle recording stopped event."""
+        filename = os.path.basename(filepath)
+        self.status_bar.showMessage(
+            f"Recording saved: {filename} ({frame_count} frames)", 5000
+        )
+
     def _confirm_exit(self) -> bool:
         """Show exit confirmation dialog."""
         reply = QMessageBox.question(
@@ -227,6 +245,10 @@ class MainWindow(QMainWindow):
         Args:
             event: Close event
         """
+        # Stop recording if active
+        if self.media_manager.is_recording:
+            self.media_manager.stop_recording()
+
         # Disconnect socket client before closing
         if self.socket_client.is_connected():
             self.socket_client.disconnect()

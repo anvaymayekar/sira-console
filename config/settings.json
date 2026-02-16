@@ -12,6 +12,14 @@
         "default_fps": 30,
         "fps_options": [15, 30, 60]
     },
+    "media": {
+        "recordings_path": "recordings",
+        "snapshots_path": "snapshots",
+        "recording_fps": 30,
+        "recording_quality": 95,
+        "snapshot_format": "png",
+        "video_codec": "mp4v"
+    },
     "ui": {
         "theme": "dark",
         "accent_color": "#ffc107",

@@ -1,5 +1,6 @@
 """Camera view widget for SIRA Console."""
 
+from typing import Optional
 from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -10,34 +11,42 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QFrame,
 )
-from src.network import SocketClient
-import cv2
 from PyQt5.QtCore import Qt, QTimer, pyqtSlot
-from typing import Optional
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen
 from src.utils.constants import Colors
 import numpy as np
+import cv2
+from src.network import SocketClient
+from src.core.media_manager import MediaManager  # NEW IMPORT
 
 
 class CameraView(QWidget):
     """Camera view widget with controls."""
 
-    def __init__(self, socket_client: Optional[SocketClient] = None, parent=None):
+    def __init__(
+        self,
+        socket_client: Optional[SocketClient] = None,
+        media_manager: Optional[MediaManager] = None,
+        parent=None,
+    ):
         """
         Initialize camera view.
 
         Args:
             socket_client: Socket client for receiving frames
+            media_manager: Media manager for recordings/snapshots
             parent: Parent widget
         """
         super().__init__(parent)
         self.socket_client = socket_client
+        self.media_manager = media_manager
         self._recording = False
         self._show_grid = False
         self._current_fps = 30
+        self._current_frame: Optional[np.ndarray] = None  # Store current frame
         self._setup_ui()
 
-        # Connect to socket client if provided
+        # Connect to socket client
         if self.socket_client:
             self.socket_client.frame_received.connect(self._update_frame)
             self.socket_client.connection_changed.connect(self._on_connection_changed)
@@ -119,11 +128,6 @@ class CameraView(QWidget):
 
         self.setLayout(layout)
 
-        # # Setup demo timer
-        # self._demo_timer = QTimer()
-        # self._demo_timer.timeout.connect(self._update_demo_frame)
-        # self._demo_timer.start(33)  # ~30 FPS
-
     def _toggle_recording(self, checked: bool) -> None:
         """
         Toggle recording state.
@@ -131,24 +135,48 @@ class CameraView(QWidget):
         Args:
             checked: Recording state
         """
-        self._recording = checked
+        if not self.media_manager:
+            print("Media manager not available")
+            self.record_btn.setChecked(False)
+            return
+
         if checked:
-            self.record_btn.setText("Stop")
-            self.record_btn.setStyleSheet(
-                f"""
-                QPushButton {{
-                    background-color: {Colors.STATUS_RED};
-                    color: {Colors.TEXT_PRIMARY};
-                }}
-            """
-            )
+            # Start recording
+            if self._current_frame is not None:
+                success = self.media_manager.start_recording(self._current_frame)
+                if success:
+                    self._recording = True
+                    self.record_btn.setText("Stop")
+                    self.record_btn.setStyleSheet(
+                        f"""
+                        QPushButton {{
+                            background-color: {Colors.STATUS_RED};
+                            color: {Colors.TEXT_PRIMARY};
+                        }}
+                    """
+                    )
+                else:
+                    self.record_btn.setChecked(False)
+            else:
+                print("No frame available to start recording")
+                self.record_btn.setChecked(False)
         else:
+            # Stop recording
+            self.media_manager.stop_recording()
+            self._recording = False
             self.record_btn.setText("Record")
             self.record_btn.setStyleSheet("")
 
     def _take_snapshot(self) -> None:
         """Take a snapshot of current frame."""
-        pass  # Placeholder for snapshot functionality
+        if not self.media_manager:
+            print("Media manager not available")
+            return
+
+        if self._current_frame is not None:
+            self.media_manager.take_snapshot(self._current_frame)
+        else:
+            print("No frame available for snapshot")
 
     def _toggle_grid(self, checked: bool) -> None:
         """
@@ -158,6 +186,9 @@ class CameraView(QWidget):
             checked: Grid state
         """
         self._show_grid = checked
+        # Redraw current frame with/without grid
+        if self._current_frame is not None:
+            self._display_frame(self._current_frame)
 
     def _change_resolution(self, resolution: str) -> None:
         """
@@ -166,7 +197,9 @@ class CameraView(QWidget):
         Args:
             resolution: Resolution string
         """
-        pass  # Placeholder for resolution change
+        # This would send command to Pi to change resolution
+        # For now, just placeholder
+        pass
 
     def _change_fps(self, fps: str) -> None:
         """
@@ -176,6 +209,8 @@ class CameraView(QWidget):
             fps: FPS string
         """
         self._current_fps = int(fps)
+        # This would send command to Pi to change FPS
+        # For now, just placeholder
 
     @pyqtSlot(np.ndarray)
     def _update_frame(self, frame: np.ndarray):
@@ -184,6 +219,23 @@ class CameraView(QWidget):
 
         Args:
             frame: BGR frame from Pi
+        """
+        # Store current frame
+        self._current_frame = frame.copy()
+
+        # Record frame if recording
+        if self._recording and self.media_manager:
+            self.media_manager.record_frame(frame)
+
+        # Display frame
+        self._display_frame(frame)
+
+    def _display_frame(self, frame: np.ndarray):
+        """
+        Display frame on screen.
+
+        Args:
+            frame: BGR frame to display
         """
         # Convert BGR to RGB
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -224,3 +276,12 @@ class CameraView(QWidget):
         """
         if not connected:
             self.camera_label.setText("No Camera Feed - Disconnected")
+            self._current_frame = None
+
+            # Stop recording if active
+            if self._recording and self.media_manager:
+                self.media_manager.stop_recording()
+                self._recording = False
+                self.record_btn.setChecked(False)
+                self.record_btn.setText("Record")
+                self.record_btn.setStyleSheet("")

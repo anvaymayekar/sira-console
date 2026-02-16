@@ -1,5 +1,6 @@
 """Dashboard tab for SIRA Console."""
 
+from typing import Optional
 from PyQt5.QtWidgets import (
     QWidget,
     QHBoxLayout,
@@ -8,25 +9,32 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QButtonGroup,
 )
-from typing import Optional
-from src.network import SocketClient
 from PyQt5.QtCore import Qt
 from src.widgets import CameraView, SensorDisplay, RemoteControl, TelemetryLogsWidget
+from src.network import SocketClient
+from src.core.media_manager import MediaManager  # NEW IMPORT
 
 
 class DashboardTab(QWidget):
     """Dashboard tab containing camera, sensors, and telemetry."""
 
-    def __init__(self, socket_client: Optional[SocketClient] = None, parent=None):
+    def __init__(
+        self,
+        socket_client: Optional[SocketClient] = None,
+        media_manager: Optional[MediaManager] = None,
+        parent=None,
+    ):
         """
         Initialize dashboard tab.
 
         Args:
             socket_client: Socket client for communication
+            media_manager: Media manager for recordings/snapshots
             parent: Parent widget
         """
         super().__init__(parent)
         self.socket_client = socket_client
+        self.media_manager = media_manager
         self._current_widget = 0  # 0: sensors, 1: remote
         self._setup_ui()
 
@@ -39,8 +47,10 @@ class DashboardTab(QWidget):
         # Main horizontal splitter
         main_splitter = QSplitter(Qt.Horizontal)
 
-        # Left side: Camera view (2 parts width)
-        self.camera_view = CameraView(socket_client=self.socket_client)
+        # Left side: Camera view (2 parts width) - PASS BOTH socket_client AND media_manager
+        self.camera_view = CameraView(
+            socket_client=self.socket_client, media_manager=self.media_manager
+        )
 
         # Right side: Vertical splitter (1 part width)
         right_splitter = QSplitter(Qt.Vertical)
