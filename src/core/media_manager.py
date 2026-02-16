@@ -13,10 +13,10 @@ class MediaManager(QObject):
     """Manages video recordings and snapshots."""
 
     # Signals
-    snapshot_saved = pyqtSignal(str)  # Emits filepath when snapshot saved
-    recording_started = pyqtSignal(str)  # Emits filepath when recording starts
-    recording_stopped = pyqtSignal(str, int)  # Emits filepath and frame count
-    error_occurred = pyqtSignal(str)  # Emits error message
+    snapshot_saved = pyqtSignal(str)
+    recording_started = pyqtSignal(str)
+    recording_stopped = pyqtSignal(str, int)
+    error_occurred = pyqtSignal(str)
 
     def __init__(self, config):
         """
@@ -64,6 +64,23 @@ class MediaManager(QObject):
         print(f"  Recordings: {self.recordings_path.absolute()}")
         print(f"  Snapshots: {self.snapshots_path.absolute()}")
 
+    def _get_scaled_font_params(self, width: int):
+        """
+        Get font parameters scaled to resolution.
+
+        Args:
+            width: Frame width
+
+        Returns:
+            Tuple of (font_scale, thickness)
+        """
+        # Scale based on width
+        scale = width / 640.0
+        font_scale = 0.4 * scale
+        thickness = max(1, int(1 * scale))
+
+        return font_scale, thickness
+
     def _generate_timestamp(self) -> str:
         """
         Generate timestamp for filenames.
@@ -97,10 +114,9 @@ class MediaManager(QObject):
 
         # Font settings
         font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.4
-        thickness = 1
         color = (255, 255, 255)
-        bg_color = (0, 0, 0)
+        w = frame_copy.shape[1]
+        font_scale, thickness = self._get_scaled_font_params(w)
 
         # Get text size
         (text_width, text_height), baseline = cv2.getTextSize(
@@ -112,7 +128,7 @@ class MediaManager(QObject):
         x = w - text_width - margin - 20
         y = h - margin - 10
 
-        # Draw text
+        # Draw text (no background)
         cv2.putText(
             frame_copy,
             timestamp,
@@ -123,49 +139,6 @@ class MediaManager(QObject):
             thickness,
             cv2.LINE_AA,
         )
-
-        # If recording, add duration and REC indicator in top-left
-        if recording and self.recording_start_time:
-            elapsed = datetime.now() - self.recording_start_time
-            total_seconds = int(elapsed.total_seconds())
-            hours = total_seconds // 3600
-            minutes = (total_seconds % 3600) // 60
-            seconds = total_seconds % 60
-            duration = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-
-            # Red dot
-            cv2.circle(frame_copy, (25, 25), 10, (0, 0, 255), -1)
-
-            # Duration text
-            duration_x = 50
-            duration_y = 30
-            (dur_width, dur_height), _ = cv2.getTextSize(
-                duration, font, font_scale, thickness
-            )
-
-            # Text
-            cv2.putText(
-                frame_copy,
-                duration,
-                (duration_x, duration_y),
-                font,
-                font_scale,
-                color,
-                thickness,
-                cv2.LINE_AA,
-            )
-
-            # REC text
-            cv2.putText(
-                frame_copy,
-                "REC",
-                (duration_x, duration_y + 20),
-                font,
-                0.3,
-                (0, 0, 255),
-                1,
-                cv2.LINE_AA,
-            )
 
         return frame_copy
 
@@ -219,7 +192,7 @@ class MediaManager(QObject):
 
     def start_recording(self, frame: np.ndarray) -> bool:
         """
-        Start recording video with best quality using OpenCV.
+        Start recording video in MP4 format.
 
         Args:
             frame: First frame to record (used to get dimensions)
@@ -239,19 +212,19 @@ class MediaManager(QObject):
 
         try:
             timestamp = self._generate_timestamp()
-            filename = f"recording_{timestamp}.avi"  # Changed to AVI for better quality
+            filename = f"recording_{timestamp}.mp4"
             filepath = self.recordings_path / filename
 
             # Get frame dimensions
             height, width = frame.shape[:2]
             self.frame_size = (width, height)
 
-            # Try codecs in order of quality
-            # MJPEG = Motion JPEG (best quality with OpenCV, larger files)
+            # Try codecs in order of quality for MP4
             codec_options = [
-                ("MJPG", "Motion JPEG - Best Quality"),  # Highest quality
-                ("XVID", "Xvid MPEG-4"),  # Good quality
-                ("mp4v", "MPEG-4"),  # Fallback
+                ("avc1", "H.264 AVC"),  # Best quality for MP4
+                ("h264", "H.264"),  # Alternative H.264
+                ("XVID", "Xvid MPEG-4"),  # Good fallback
+                ("mp4v", "MPEG-4"),  # Basic fallback
             ]
 
             self.video_writer = None
@@ -260,24 +233,12 @@ class MediaManager(QObject):
             for codec_code, codec_name in codec_options:
                 try:
                     fourcc = cv2.VideoWriter_fourcc(*codec_code)
-
-                    # For MJPEG, use AVI container for best compatibility
-                    if codec_code == "MJPG":
-                        test_path = self.recordings_path / f"recording_{timestamp}.avi"
-                    else:
-                        test_path = self.recordings_path / f"recording_{timestamp}.mp4"
-
                     writer = cv2.VideoWriter(
-                        str(test_path),
-                        fourcc,
-                        self.recording_fps,
-                        self.frame_size,
-                        True,  # isColor
+                        str(filepath), fourcc, self.recording_fps, self.frame_size, True
                     )
 
                     if writer.isOpened():
                         self.video_writer = writer
-                        self.current_recording_path = test_path
                         selected_codec = codec_name
                         print(f"✓ Using codec: {codec_name}")
                         break
@@ -298,14 +259,15 @@ class MediaManager(QObject):
             self.video_writer.write(frame_with_overlay)
 
             self.is_recording = True
+            self.current_recording_path = filepath
             self.frame_count = 1
 
-            print(f"Recording started: {self.current_recording_path}")
+            print(f"Recording started: {filepath}")
             print(f"  Resolution: {width}x{height}")
             print(f"  FPS: {self.recording_fps}")
             print(f"  Codec: {selected_codec}")
 
-            self.recording_started.emit(str(self.current_recording_path))
+            self.recording_started.emit(str(filepath))
             return True
 
         except Exception as e:
@@ -408,11 +370,7 @@ class MediaManager(QObject):
             List of recording filenames
         """
         try:
-            # Look for both AVI and MP4 files
-            recordings = []
-            recordings.extend([f.name for f in self.recordings_path.glob("*.avi")])
-            recordings.extend([f.name for f in self.recordings_path.glob("*.mp4")])
-            return sorted(recordings)
+            return sorted([f.name for f in self.recordings_path.glob("*.mp4")])
         except Exception:
             return []
 

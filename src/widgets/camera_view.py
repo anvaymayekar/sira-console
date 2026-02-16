@@ -102,6 +102,7 @@ class CameraView(QWidget):
         # Left controls
         self.record_btn = QPushButton("Record")
         self.record_btn.setCheckable(True)
+        self.record_btn.setMinimumWidth(90)
         self.record_btn.clicked.connect(self._toggle_recording)
 
         self.snapshot_btn = QPushButton("Snapshot")
@@ -121,7 +122,7 @@ class CameraView(QWidget):
 
         self.resolution_combo = QComboBox()
         self.resolution_combo.addItems(["640x480", "1280x720", "1920x1080"])
-        self.resolution_combo.setCurrentIndex(1)
+        self.resolution_combo.setCurrentIndex(0)
         self.resolution_combo.currentTextChanged.connect(self._change_resolution)
 
         fps_label = QLabel("FPS:")
@@ -141,6 +142,21 @@ class CameraView(QWidget):
         layout.addWidget(control_bar)
 
         self.setLayout(layout)
+
+    def _get_scaled_font_size(self, width: int, base_size: int = 11) -> int:
+        """
+        Get font size scaled to resolution.
+
+        Args:
+            width: Frame width
+            base_size: Base font size for 640px width
+
+        Returns:
+            Scaled font size
+        """
+        # Scale based on width (640px = base, 1280px = 2x, 1920px = 3x)
+        scale = width / 640.0
+        return int(base_size * scale)
 
     def _toggle_recording(self, checked: bool) -> None:
         """
@@ -245,9 +261,17 @@ class CameraView(QWidget):
         Change camera resolution.
 
         Args:
-            resolution: Resolution string
+            resolution: Resolution string (e.g., "1280x720")
         """
-        pass
+        if not self.socket_client or not self.socket_client.is_connected():
+            print("Not connected - cannot change resolution")
+            return
+
+        # Send command to Pi
+        command = {"type": "set_resolution", "resolution": resolution}
+
+        print(f"Sending resolution change command: {resolution}")
+        self.socket_client.send_command(command)
 
     def _change_fps(self, fps: str) -> None:
         """
@@ -316,6 +340,13 @@ class CameraView(QWidget):
         q_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
         pixmap = QPixmap.fromImage(q_image)
 
+        # dynamic font size
+        w = frame.shape[1]  # Get frame width
+        timestamp_size = self._get_scaled_font_size(w, base_size=8)
+        duration_size = self._get_scaled_font_size(w, base_size=10)
+        rec_size = self._get_scaled_font_size(w, base_size=7)
+        dot_size = self._get_scaled_font_size(w, base_size=18)
+
         # Create painter for overlays
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
@@ -335,67 +366,99 @@ class CameraView(QWidget):
                 painter.drawLine(0, y, w, y)
 
         # Draw recording indicator if recording
+        # if self._recording:
+        #     margin = 15
+
+        #     # Recording dot with fade effect
+        #     painter.setBrush(QColor(255, 0, 0, self._blink_opacity))
+        #     painter.setPen(Qt.NoPen)
+        #     painter.drawEllipse(margin, margin, dot_size, dot_size)
+
+        #     # Recording timer (aligned with dot)
+        #     duration = self._get_recording_duration()
+        #     font = QFont("Consolas", duration_size, QFont.Bold)
+        #     painter.setFont(font)
+
+        #     # Measure text for proper alignment
+        #     fm = painter.fontMetrics()
+        #     text_height = fm.height()
+        #     text_width = fm.horizontalAdvance(duration)
+
+        #     # Position text vertically centered with dot
+        #     text_x = margin + dot_size + 10
+        #     text_y = margin + (dot_size - text_height) // 2 + fm.ascent()
+
+        #     # Draw text background (semi-transparent black)
+        #     bg_padding = 5
+        #     bg_rect = fm.boundingRect(duration)
+        #     bg_rect.moveTopLeft(
+        #         painter.transform().map(
+        #             painter.worldTransform()
+        #             .inverted()[0]
+        #             .map(
+        #                 painter.deviceTransform().map(
+        #                     painter.transform().map(
+        #                         painter.worldTransform().map(
+        #                             painter.deviceTransform()
+        #                             .inverted()[0]
+        #                             .map(QPixmap().rect().topLeft())
+        #                         )
+        #                     )
+        #                 )
+        #             )
+        #         )
+        #     )
+        #     bg_x = text_x - bg_padding
+        #     bg_y = margin - bg_padding
+        #     bg_w = text_width + bg_padding * 2
+        #     bg_h = dot_size + bg_padding * 2
+
+        #     # Draw text (white)
+        #     painter.setPen(QColor(255, 255, 255))
+        #     painter.drawText(text_x, text_y, duration)
+
+        #     # "REC" text below
+        #     rec_font = QFont("Consolas", rec_size, QFont.Bold)
+        #     painter.setFont(rec_font)
+        #     rec_y = margin + dot_size + 15
+        #     painter.drawText(margin + dot_size + 10, rec_y, "REC")
+
         if self._recording:
-            margin = 15
-            dot_size = 18
+            # Scale all values based on resolution
+            scale = w / 640.0
+            margin = int(15 * scale)
 
             # Recording dot with fade effect
             painter.setBrush(QColor(255, 0, 0, self._blink_opacity))
             painter.setPen(Qt.NoPen)
-            painter.drawEllipse(margin, margin, dot_size, dot_size)
+            painter.drawEllipse(margin, int(margin * 1.6), dot_size, dot_size)
 
             # Recording timer (aligned with dot)
             duration = self._get_recording_duration()
-            font = QFont("Consolas", 14, QFont.Bold)
+            font = QFont("Consolas", duration_size, QFont.Bold)
             painter.setFont(font)
 
             # Measure text for proper alignment
             fm = painter.fontMetrics()
             text_height = fm.height()
-            text_width = fm.horizontalAdvance(duration)
 
             # Position text vertically centered with dot
-            text_x = margin + dot_size + 10
-            text_y = margin + (dot_size - text_height) // 2 + fm.ascent()
-
-            # Draw text background (semi-transparent black)
-            bg_padding = 5
-            bg_rect = fm.boundingRect(duration)
-            bg_rect.moveTopLeft(
-                painter.transform().map(
-                    painter.worldTransform()
-                    .inverted()[0]
-                    .map(
-                        painter.deviceTransform().map(
-                            painter.transform().map(
-                                painter.worldTransform().map(
-                                    painter.deviceTransform()
-                                    .inverted()[0]
-                                    .map(QPixmap().rect().topLeft())
-                                )
-                            )
-                        )
-                    )
-                )
-            )
-            bg_x = text_x - bg_padding
-            bg_y = margin - bg_padding
-            bg_w = text_width + bg_padding * 2
-            bg_h = dot_size + bg_padding * 2
+            text_x = margin + dot_size + int(10 * scale)
+            text_y = margin + (dot_size + fm.ascent()) // 2
 
             # Draw text (white)
             painter.setPen(QColor(255, 255, 255))
             painter.drawText(text_x, text_y, duration)
 
             # "REC" text below
-            rec_font = QFont("Consolas", 9, QFont.Bold)
+            rec_font = QFont("Consolas", rec_size, QFont.Bold)
             painter.setFont(rec_font)
-            rec_y = margin + dot_size + 15
-            painter.drawText(margin + dot_size + 10, rec_y, "REC")
+            rec_y = margin + dot_size + int(15 * scale)
+            painter.drawText(text_x, rec_y, "REC")
 
         # Draw timestamp (bottom-right corner) - ALWAYS visible
         timestamp = self._get_current_timestamp()
-        timestamp_font = QFont("Consolas", 11, QFont.Normal)
+        timestamp_font = QFont("Consolas", timestamp_size, QFont.Normal)
         painter.setFont(timestamp_font)
 
         fm = painter.fontMetrics()
